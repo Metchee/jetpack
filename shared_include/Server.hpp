@@ -7,20 +7,34 @@
 #include "Config.hpp"
 #include "Packet.hpp"
 #include <unordered_map>
+
 class Server {
     public:
+        struct FileInfo {
+            std::string name;
+            std::string path;
+            uintmax_t size;
+        };
         Server(int argc, char* argv[]);
         ~Server();
         void run();
         void stop();
     private:
-        void loadMap();
+    // file transfer
+        std::vector<FileInfo> getDirectoryList(const std::string &directoryPath);
+        void sendDirectoryList(int clientSocket, const std::string &directoryPath);
+        void sendFile(int clientSocket, const std::string& filePath);
+    // server management
         void handleNewConnection();
         void handleClientData(int client_fd);
         void removeClient(int fd);
-        void sendPacket(int client_fd, PacketModule& packet);
-        bool readPacket(int client_fd, PacketModule& packet);
+    // packets handling
+        void broadcastPackets();
+        int sendPacket(int client_fd, PacketModule &packetModule);
+        bool readPacket(int client_fd, PacketModule &packetModule);
 
+    // local variables
+        bool _packetsUpdated;
         int _serverFd;
         int _nbClients;
         std::vector<std::shared_ptr<pollfd>> _fdsList;

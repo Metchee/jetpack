@@ -1,11 +1,12 @@
-#include "../include/Client.hpp"
+#include "../shared_include/Client.hpp"
 #include <cstdio>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <stdexcept>
 #include <iostream>
 
-void Client::parseArguments(int argc, const char *argv[])
+void ClientModule::Client::parseArguments(int argc, const char *argv[])
 {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -19,18 +20,18 @@ void Client::parseArguments(int argc, const char *argv[])
     }
 }
 
-Client::Client(int ac, const char *av[]) :
+ClientModule::Client::Client(int ac, const char *av[]) :
     fd(-1), id(-1), serverPort(-1), serverIp(""), connected(false)
 {
     parseArguments(ac, av);
 }
 
-Client::~Client() {
+ClientModule::Client::~Client() {
     if (connected) {
         close(fd);
     }
 }
-void Client::run()
+void ClientModule::Client::run()
 {
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -50,60 +51,95 @@ void Client::run()
     if (debugMode) {
         std::cout << "Connected to server at " << getAddress() << std::endl;
     }
-    std::string message = "Hello from client!";
-    std::vector<char> data(message.begin(), message.end());
-    send(data);
-
-    while (connected) {
-        std::vector<char> data = receive(MAX_INPUT);
-        if (data.empty()) {
-            break;
-        }
-        if (debugMode) {
-            std::cout << "Received: " << std::string(data.begin(), data.end()) << std::endl;
-        }
-    }
+    startThread();
+    runThread();
 }
 
-void Client::stop() {
+void ClientModule::Client::stop() {
     connected = false;
 }
 
-void Client::send(const std::vector<char>& data)
-{
-    if (!connected)
-        throw std::runtime_error("Not connected");
-    ssize_t sent = ::send(fd, data.data(), data.size(), 0);
-    if (sent < 0) {
-        connected = false;
-        throw std::runtime_error("Send failed");
-    }
-}
-
-std::vector<char> Client::receive(size_t maxSize)
-{
-    if (!connected)
-        throw std::runtime_error("Not connected");
-    std::vector<char> buffer(maxSize);
-    ssize_t received = recv(fd, buffer.data(), buffer.size(), 0);
-    if (received <= 0) {
-        connected = false;
-        return {};
-    }
-    buffer.resize(received);
-    for (size_t i = 0; i < buffer.size(); i++) {
-        printf("%c", buffer[i]);
-    }
-    return buffer;
-}
-
-std::string Client::getAddress() const {
+std::string ClientModule::Client::getAddress() const {
     char ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &address.sin_addr, ip, INET_ADDRSTRLEN);
     return std::string(ip) + ":" + std::to_string(ntohs(address.sin_port));
 }
 
-int Client::getFd() const {return fd;}
-int Client::getId() const {return id;}
-void Client::setId(int id) {this->id = id;}
-bool Client::isConnected() const {return connected;}
+void ClientModule::Client::gameThread(/* Game structure*/)
+{
+    while(connected) {
+        // get player_input = getPlayerInput();
+        PacketModule current_state;
+        {
+            std::lock_guard<std::mutex> lock(_packetMutex);
+            current_state.setPacket(packet.getPacket());
+        }
+        // if (debugMode) {
+        //     std::lock_guard<std::mutex> lock(_packetMutex);
+        //     current_state.display("[CLIENT] Game");
+        // }
+        // renderGame(current_state);
+    }
+    
+}
+void ClientModule::Client::networkThread()
+{
+    PacketModule newGameState;
+
+    while (connected) {
+        if (recv(fd, &newGameState, sizeof(PacketModule::Packet), MSG_DONTWAIT) == -1) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                connected = false;
+            }
+        }
+        if (debugMode) {
+            std::lock_guard<std::mutex> lock(_packetMutex);
+            newGameState.display("[CLIENT]: Recv: ");
+        }
+        {
+            std::lock_guard<std::mutex> lock(_packetMutex);
+            packet.setPacket(newGameState.getPacket());
+        }
+        PacketModule outgoingPacket;
+        {
+            std::lock_guard<std::mutex> lock(_packetMutex);
+            outgoingPacket.setPacket(packet.getPacket());
+        }
+        if (send(fd, &outgoingPacket.getPacket(), sizeof(PacketModule::Packet), MSG_DONTWAIT) == -1) {
+            connected = false;
+        }
+        if (debugMode) {
+            std::lock_guard<std::mutex> lock(_packetMutex);
+            outgoingPacket.display("[CLIENT]: Send: ");
+        }
+    }
+}
+
+
+void ClientModule::Client::startThread()
+{
+    try {
+        _gameThread = std::thread(&Client::gameThread, this);
+        _networkThread = std::thread(&Client::networkThread, this);
+    } catch (const std::system_error& e) {
+        std::cerr << "Thread startup failed: " << e.what() << "\n";
+        connected = false;
+    }
+}
+
+void ClientModule::Client::runThread()
+{
+    if (_gameThread.joinable()) {
+        _gameThread.join();
+    }
+    if (_networkThread.joinable()) {
+        _networkThread.join();
+    }
+
+    _gameThread = std::thread([this]() {
+        gameThread(); 
+    });
+    _networkThread = std::thread([this]() {
+        networkThread();
+    }); 
+}

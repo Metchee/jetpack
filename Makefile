@@ -6,20 +6,22 @@
 ##
 
 CC = g++
-CFLAGS = -Wall -Wextra -std=c++17 -Iinclude
+CFLAGS = -Wall -Wextra -std=c++17 -Ishared_include
 LDFLAGS = -lpthread
 
 SERVER_DIR = server_src
 CLIENT_DIR = client_src
 SHARED_DIR = shared_include
 
-SERVER_SRC = $(SERVER_DIR)/server.cpp \
-             $(SERVER_DIR)/main.cpp \
-             $(SERVER_DIR)/config.cpp \
-             $(SERVER_DIR)/packet.cpp
+SERVER_SRC = 	$(SERVER_DIR)/server.cpp 		\
+            	$(SERVER_DIR)/main.cpp 			\
+            	$(SERVER_DIR)/config.cpp 		\
+            	$(SERVER_DIR)/packet.cpp		\
+				$(SERVER_DIR)/sendAssets.cpp	\
 
 CLIENT_SRC = $(CLIENT_DIR)/client.cpp \
              $(CLIENT_DIR)/main.cpp \
+             $(CLIENT_DIR)/receiveAssets.cpp \
              $(SERVER_DIR)/packet.cpp
 
 SERVER_OBJ = $(SERVER_SRC:.cpp=.o)

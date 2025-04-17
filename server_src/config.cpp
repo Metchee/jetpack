@@ -1,4 +1,4 @@
-#include "../include/Config.hpp"
+#include "../shared_include/Config.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <unistd.h>

@@ -1,5 +1,5 @@
-#include "../include/Server.hpp"
-#include "../include/Error.hpp"
+#include "../shared_include/Server.hpp"
+#include "../shared_include/Error.hpp"
 #include <iostream>
 
 int main(int argc, char* argv[]) {
