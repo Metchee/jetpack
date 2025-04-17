@@ -75,3 +75,18 @@ void PacketModule::setPacket(const struct Packet& pkt)
 {
     this->pkt = pkt;
 }
+
+void PacketModule::display(std::string info)
+{
+    std::cout << info << "Packet type: " << pkt.type << ", Client ID: " << pkt.client_id << std::endl;
+    std::cout << info << "Number of clients: " << pkt.nb_client << std::endl;
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (i < pkt.nb_client) {
+            std::cout << info << "Player " << i << " state: " << pkt.playerState[i]
+                      << ", Position: (" << pkt.playerPosition[i].first << ", " << pkt.playerPosition[i].second << ")"
+                      << ", Score: " << pkt.playerScore[i]
+                      << ", Jetpack: " << (pkt.jetpackActive[i] ? "ON" : "OFF") << std::endl;
+        }
+    }
+}

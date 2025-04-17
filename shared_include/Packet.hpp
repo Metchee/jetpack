@@ -57,6 +57,7 @@ class PacketModule {
         void display(std::string info);
         void setPacket(const struct Packet& pkt);
         Packet& getPacket() { return pkt; }
+        const Packet& getPacket() const { return pkt; }  // Ajoutez cette ligne
         int getNbClient() const;
         int getClientId() const;
         gameState getstate() const;
