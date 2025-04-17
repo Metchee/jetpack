@@ -395,30 +395,30 @@ int Server::sendPacket(int client_fd, PacketModule& packetModule)
 
 void Server::startGame()
 {
-    if (_fdsList.size() < 3) {  // Moins de 2 clients + le serveur
-        // On a besoin d'au moins 2 joueurs
+    if (_fdsList.size() < 3) {  // Less than 2 clients + server
         return;
     }
     
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Starting game with " << _fdsList.size() - 1 << " players" << std::endl;
+    }
+    
+    // Initialize game
     _game.init();
     _gameStarted = true;
     _gameWaitingForPlayers = false;
     
-    // Envoyer la carte à tous les clients
+    // Send map to all clients
     for (auto& client : _fdsList) {
         if (client->fd != _serverFd) {
             sendMapToClient(client->fd);
         }
     }
     
-    // Initialiser l'horodatage de mise à jour
+    // Reset update timestamp
     _lastUpdateTime = std::chrono::high_resolution_clock::now();
     
-    if (config.debug_mode) {
-        std::cout << "[SERVER] Game started with " << _fdsList.size() - 1 << " players" << std::endl;
-    }
-    
-    // Mettre à jour les paquets pour indiquer que le jeu a commencé
+    // Update packets to indicate game has started
     for (auto& pair : _packets) {
         auto& pkt = pair.second.getPacket();
         for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -429,26 +429,27 @@ void Server::startGame()
     _packetsUpdated = true;
 }
 
+
 void Server::updateGame()
 {
-    // Calculer le delta time
+    // Calculate delta time
     auto currentTime = std::chrono::high_resolution_clock::now();
     float deltaTime = std::chrono::duration<float>(currentTime - _lastUpdateTime).count();
     _lastUpdateTime = currentTime;
     
-    // Limiter deltaTime pour éviter les sauts trop grands
+    // Limit deltaTime to avoid huge jumps
     if (deltaTime > 0.1f) {
         deltaTime = 0.1f;
     }
     
-    // Mettre à jour l'état du jeu
+    // Update game state
     _game.update(deltaTime);
     
-    // Vérifier si le jeu est terminé
+    // Check if the game is over
     if (_game.isGameOver()) {
         int winner = _game.getWinner();
         
-        // Mettre à jour les paquets pour indiquer que le jeu est terminé
+        // Update packets to indicate game is over
         for (auto& pair : _packets) {
             auto& pkt = pair.second.getPacket();
             for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -460,7 +461,7 @@ void Server::updateGame()
             }
         }
         
-        // Réinitialiser l'état du jeu pour la prochaine partie
+        // Reset game state for next round
         _gameStarted = false;
         _gameWaitingForPlayers = true;
         
@@ -473,16 +474,17 @@ void Server::updateGame()
         }
     }
     
-    // Mettre à jour les paquets avec le nouvel état du jeu
+    // Update packets with new game state
     for (int i = 0; i < std::min(MAX_CLIENTS, _nbClients - 1); ++i) {
         const auto& player = _game.getPlayer(i);
         
-        // Mettre à jour chaque client avec la position de tous les joueurs
+        // Update each client with all player positions
         for (auto& pair : _packets) {
             auto& pkt = pair.second.getPacket();
             
+            // Store position with increased precision (×100)
             pkt.playerPosition[i] = std::make_pair(
-                static_cast<int>(player.x * 100), // Multiplier par 100 pour conserver la précision
+                static_cast<int>(player.x * 100),
                 static_cast<int>(player.y * 100)
             );
             
@@ -506,28 +508,33 @@ void Server::handlePlayerInput(int clientId, const PacketModule& packet)
         return;
     }
     
-    // Extraire les informations d'entrée du paquet
+    // Extract input from packet
     bool jetpackActive = packet.getJetpackActive();
     
-    // Mettre à jour le joueur
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Player " << clientId << " jetpack: " 
+                  << (jetpackActive ? "ON" : "OFF") << std::endl;
+    }
+    
+    // Calculate delta time
     auto currentTime = std::chrono::high_resolution_clock::now();
     float deltaTime = std::chrono::duration<float>(currentTime - _lastUpdateTime).count();
     
-    // Limiter deltaTime pour éviter les sauts trop grands
+    // Limit deltaTime
     if (deltaTime > 0.1f) {
         deltaTime = 0.1f;
     }
     
+    // Update player in game
     _game.updatePlayer(clientId, jetpackActive, deltaTime);
 }
-
 void Server::sendMapToClient(int clientFd)
 {
-    // Créer un paquet contenant la carte
+    // Create a packet containing the map data
     PacketModule mapPacket(_nbClients - 1);
     mapPacket.setPacketType(PacketModule::MAP_DATA);
     
-    // Trouver l'ID du client
+    // Find the client ID
     auto it = _clientIds.find(clientFd);
     if (it == _clientIds.end()) {
         if (config.debug_mode) {
@@ -539,10 +546,38 @@ void Server::sendMapToClient(int clientFd)
     int clientId = it->second;
     mapPacket.getPacket().client_id = clientId;
     
-    // Envoyer le paquet
+    // Get the map dimensions
+    int height = _game.getHeight();
+    int width = _game.getWidth();
+    
+    // We have limited space in the packet, so we'll encode the map efficiently
+    // Each cell takes 4 bits (up to 16 different tile types)
+    // We can pack 2 cells into 1 byte
+    
+    // For demonstration, let's add some encoded map data to the packet
+    // In a real implementation, you'd need to create a custom map serialization format
+    
+    const std::vector<std::vector<TileType>>& gameMap = _game.getMap();
+    
+    // For now, we'll just use the player positions to indicate that map data was sent
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        // Store map dimensions in player positions (hack but works for now)
+        if (i == 0) {
+            mapPacket.getPacket().playerPosition[i] = std::make_pair(width, height);
+        }
+        
+        // Store some markers to indicate this is map data
+        mapPacket.getPacket().playerScore[i] = 12345; // Magic number to identify map data packet
+    }
+    
+    // Send the packet
     sendPacket(clientFd, mapPacket);
     
     if (config.debug_mode) {
-        std::cout << "[SERVER] Sent map to client " << clientId << std::endl;
+        std::cout << "[SERVER] Sent map dimensions " << width << "x" << height 
+                  << " to client " << clientId << std::endl;
     }
+    
+    // For a complete implementation, you might need to send multiple packets
+    // to transmit the entire map data depending on its size
 }

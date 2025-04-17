@@ -54,7 +54,13 @@ private:
     std::map<TileType, sf::Sprite> _tileSprites;
     sf::Sprite _playerSprite;
     sf::Sprite _otherPlayerSprite;
+    sf::Sprite _backgroundSprite;
     sf::Font _font;
+    
+    // Animation
+    float _backgroundScroll;
+    int _playerAnimFrame;
+    float _animClock;
     
     // État du jeu
     std::vector<std::vector<TileType>> _map;
@@ -74,5 +80,7 @@ private:
     void drawMap();
     void drawPlayers();
     void drawUI();
+    void drawBackground();
     void handleEvents();
+    void updateAnimations(float deltaTime);
 };

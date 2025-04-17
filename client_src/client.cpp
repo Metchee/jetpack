@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <stdexcept>
 #include <iostream>
+#include <fstream>
 
 void ClientModule::Client::parseArguments(int argc, const char *argv[])
 {
@@ -21,7 +22,7 @@ void ClientModule::Client::parseArguments(int argc, const char *argv[])
 }
 
 ClientModule::Client::Client(int ac, const char *av[]) :
-    fd(-1), id(-1), serverPort(-1), serverIp(""), connected(false)
+    fd(-1), id(-1), serverPort(-1), serverIp(""), connected(false), debugMode(false)
 {
     parseArguments(ac, av);
 }
@@ -31,6 +32,7 @@ ClientModule::Client::~Client() {
         close(fd);
     }
 }
+
 void ClientModule::Client::run()
 {
     fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -55,6 +57,35 @@ void ClientModule::Client::run()
     runThread();
 }
 
+void ClientModule::Client::startThread()
+{
+    if (debugMode) {
+        std::cout << "[CLIENT] Starting game and network threads" << std::endl;
+    }
+    
+    try {
+        // Créer les threads initiaux
+        _gameThread = std::thread(&Client::gameThread, this);
+        _networkThread = std::thread(&Client::networkThread, this);
+    } catch (const std::system_error& e) {
+        std::cerr << "Thread startup failed: " << e.what() << "\n";
+        connected = false;
+    }
+}
+
+void ClientModule::Client::runThread()
+{
+    // Attendre que les threads se terminent
+    if (_gameThread.joinable()) {
+        _gameThread.join();
+    }
+    if (_networkThread.joinable()) {
+        _networkThread.join();
+    }
+    
+    // Vous pourriez ajouter une logique ici pour redémarrer les threads si nécessaire
+    // Mais normalement, une fois que les threads se terminent, le client devrait aussi terminer
+}
 void ClientModule::Client::stop() {
     connected = false;
 }
@@ -68,10 +99,14 @@ std::string ClientModule::Client::getAddress() const {
 void ClientModule::Client::gameThread()
 {
     // Initialiser le moteur graphique
-    if (!_graphics.init(800, 600, "Jetpack - Client " + std::to_string(id))) {
+    if (!_graphics.init(1024, 768, "Jetpack Joyride - Client")) {
         std::cerr << "Failed to initialize graphics engine" << std::endl;
         connected = false;
         return;
+    }
+    
+    if (debugMode) {
+        std::cout << "[CLIENT] Graphics engine initialized successfully" << std::endl;
     }
     
     // Charger les ressources graphiques
@@ -81,14 +116,22 @@ void ClientModule::Client::gameThread()
         return;
     }
     
-    // Recevoir la carte du serveur (à implémenter)
+    if (debugMode) {
+        std::cout << "[CLIENT] Graphics resources loaded successfully" << std::endl;
+    }
+    
+    // Recevoir la carte du serveur
     receiveMap();
     
     // Définir la carte dans le moteur graphique
     _graphics.setMap(_map);
     
     // Boucle principale du jeu
+    sf::Clock gameClock;
     while (connected && _graphics.isOpen()) {
+        // Limiter le taux de rafraîchissement
+        sf::Time frameTime = gameClock.restart();
+        
         // Obtenir l'état du jeu actuel
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
@@ -103,11 +146,13 @@ void ClientModule::Client::gameThread()
         
         // Faire tourner le moteur graphique (une itération)
         _graphics.run();
+        
+        // Attendre un peu pour éviter d'utiliser trop de CPU
+        sf::sleep(sf::milliseconds(16)); // ~60 FPS
     }
     
-    // Si on sort de la boucle et que la fenêtre est encore ouverte, on la ferme
-    if (_graphics.isOpen()) {
-        // La fenêtre se fermera automatiquement quand l'objet _graphics sera détruit
+    if (debugMode) {
+        std::cout << "[CLIENT] Game loop exited" << std::endl;
     }
     
     // Signaler la déconnexion
@@ -116,55 +161,123 @@ void ClientModule::Client::gameThread()
 
 void ClientModule::Client::receiveMap()
 {
-    // Pour l'instant, on crée une carte par défaut
-    // Cette méthode devrait normalement recevoir les données de la carte du serveur
+    // Try to receive map from server
+    bool mapReceived = false;
     
-    const int width = 20;
-    const int height = 10;
+    // Wait for a short time to see if we receive map data
+    if (debugMode) {
+        std::cout << "[CLIENT] Waiting for map data from server..." << std::endl;
+    }
+    
+    // We'll use a timeout to avoid waiting forever
+    int attempts = 0;
+    const int MAX_ATTEMPTS = 10;
+    
+    while (!mapReceived && attempts < MAX_ATTEMPTS) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // Check if we've received a map packet
+        {
+            std::lock_guard<std::mutex> lock(_packetMutex);
+            if (packet.getPacketType() == PacketModule::MAP_DATA) {
+                // TODO: Process actual map data when server sends it
+                mapReceived = true;
+                if (debugMode) {
+                    std::cout << "[CLIENT] Received map data from server" << std::endl;
+                }
+            }
+        }
+        
+        attempts++;
+    }
+    
+    if (!mapReceived) {
+        if (debugMode) {
+            std::cout << "[CLIENT] No map data received, creating default map" << std::endl;
+        }
+    }
+    
+    // For now, we'll still create a default map to ensure we have something to display
+    const int width = 100;  // Much wider map for scrolling
+    const int height = 20;
     
     _map.resize(height, std::vector<TileType>(width, EMPTY));
     
-    // Ajouter des murs aux bords
+    // Add a ground level
     for (int x = 0; x < width; ++x) {
-        _map[0][x] = WALL;
         _map[height - 1][x] = WALL;
     }
     
-    for (int y = 0; y < height; ++y) {
-        _map[y][0] = WALL;
-        _map[y][width - 1] = WALL;
+    // Add ceiling
+    for (int x = 0; x < width; ++x) {
+        _map[0][x] = WALL;
     }
     
-    // Ajouter quelques plateformes
-    for (int x = 5; x < 15; ++x) {
-        _map[3][x] = WALL;
-        _map[6][x] = WALL;
+    // Add some platforms at varying heights
+    for (int x = 10; x < 20; ++x) {
+        _map[height - 5][x] = WALL;
     }
     
-    // Ajouter des pièces
-    _map[1][5] = COIN;
-    _map[1][10] = COIN;
-    _map[1][15] = COIN;
-    _map[4][7] = COIN;
-    _map[4][12] = COIN;
-    _map[7][8] = COIN;
-    _map[7][14] = COIN;
+    for (int x = 25; x < 35; ++x) {
+        _map[height - 7][x] = WALL;
+    }
     
-    // Ajouter des zones électriques
-    _map[2][8] = ELECTRIC;
-    _map[5][10] = ELECTRIC;
-    _map[8][5] = ELECTRIC;
+    for (int x = 40; x < 55; ++x) {
+        _map[height - 9][x] = WALL;
+    }
     
-    // Ajouter les points de départ
-    _map[1][2] = START_P1;
-    _map[7][2] = START_P2;
+    for (int x = 60; x < 70; ++x) {
+        _map[height - 6][x] = WALL;
+    }
     
-    // Ajouter la ligne d'arrivée
-    _map[4][width - 2] = FINISH;
+    for (int x = 75; x < 90; ++x) {
+        _map[height - 8][x] = WALL;
+    }
+    
+    // Add coins in patterns
+    for (int x = 5; x < width - 5; x += 5) {
+        _map[height - 4][x] = COIN;
+    }
+    
+    // Create coin arcs
+    for (int i = 0; i < 3; ++i) {
+        int centerX = 20 + i * 30;
+        int centerY = height - 8;
+        int radius = 5;
+        
+        for (int j = 0; j < 7; ++j) {
+            int x = centerX + j;
+            int y = centerY - static_cast<int>(radius * sin(j * 3.14159 / 6));
+            if (y > 0 && y < height && x > 0 && x < width) {
+                _map[y][x] = COIN;
+            }
+        }
+    }
+    
+    // Add electric hazards
+    _map[height - 3][15] = ELECTRIC;
+    _map[height - 3][30] = ELECTRIC;
+    _map[height - 3][45] = ELECTRIC;
+    _map[height - 3][60] = ELECTRIC;
+    _map[height - 3][75] = ELECTRIC;
+    
+    // Add some suspended electric hazards
+    _map[height - 10][25] = ELECTRIC;
+    _map[height - 12][50] = ELECTRIC;
+    _map[height - 8][75] = ELECTRIC;
+    
+    // Add starting positions
+    _map[height - 3][2] = START_P1;
+    _map[height - 3][4] = START_P2;
+    
+    // Add finish line
+    _map[5][width - 2] = FINISH;
+    _map[6][width - 2] = FINISH;
+    _map[7][width - 2] = FINISH;
     _map[8][width - 2] = FINISH;
     
     if (debugMode) {
-        std::cout << "[CLIENT] Created default map" << std::endl;
+        std::cout << "[CLIENT] Created default map with dimensions: " << width << "x" << height << std::endl;
     }
 }
 
@@ -174,21 +287,37 @@ void ClientModule::Client::networkThread()
     PacketModule newGameState;
 
     while (connected) {
-        if (recv(fd, &newGameState, sizeof(PacketModule::Packet), MSG_DONTWAIT) == -1) {
+        // Try to receive game state from server
+        ssize_t recvSize = recv(fd, &newGameState, sizeof(PacketModule::Packet), MSG_DONTWAIT);
+        
+        if (recvSize == -1) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                if (debugMode) {
+                    std::cerr << "[CLIENT] Error receiving data: " << strerror(errno) << std::endl;
+                }
                 connected = false;
             }
-        } else {
+        } else if (recvSize == 0) {
+            // Connection closed by server
+            if (debugMode) {
+                std::cout << "[CLIENT] Server closed the connection" << std::endl;
+            }
+            connected = false;
+        } else if (recvSize == sizeof(PacketModule::Packet)) {
+            // Successfully received a full packet
             if (debugMode) {
                 std::lock_guard<std::mutex> lock(_packetMutex);
-                newGameState.display("[CLIENT]: Recv: ");
+                newGameState.display("[CLIENT] Received: ");
             }
+            
+            // Update our local packet with the received data
             {
                 std::lock_guard<std::mutex> lock(_packetMutex);
                 packet.setPacket(newGameState.getPacket());
             }
         }
         
+        // Send player input to server (mainly jetpack state)
         PacketModule outgoingPacket;
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
@@ -196,44 +325,23 @@ void ClientModule::Client::networkThread()
             outgoingPacket.setPacketType(PacketModule::PLAYER_INPUT);
         }
         
-        if (send(fd, &outgoingPacket.getPacket(), sizeof(PacketModule::Packet), MSG_DONTWAIT) == -1) {
+        ssize_t sendSize = send(fd, &outgoingPacket.getPacket(), sizeof(PacketModule::Packet), MSG_DONTWAIT);
+        
+        if (sendSize == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            if (debugMode) {
+                std::cerr << "[CLIENT] Error sending data: " << strerror(errno) << std::endl;
+            }
             connected = false;
-        }
-        
-        if (debugMode) {
+        } else if (sendSize == sizeof(PacketModule::Packet) && debugMode) {
             std::lock_guard<std::mutex> lock(_packetMutex);
-            outgoingPacket.display("[CLIENT]: Send: ");
+            outgoingPacket.display("[CLIENT] Sent: ");
         }
         
-        // Attendre un court instant pour éviter une utilisation excessive du CPU
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        // Limit update rate to reduce CPU usage
+        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60Hz
     }
-}
-
-void ClientModule::Client::startThread()
-{
-    try {
-        _gameThread = std::thread(&Client::gameThread, this);
-        _networkThread = std::thread(&Client::networkThread, this);
-    } catch (const std::system_error& e) {
-        std::cerr << "Thread startup failed: " << e.what() << "\n";
-        connected = false;
+    
+    if (debugMode) {
+        std::cout << "[CLIENT] Network thread exited" << std::endl;
     }
-}
-
-void ClientModule::Client::runThread()
-{
-    if (_gameThread.joinable()) {
-        _gameThread.join();
-    }
-    if (_networkThread.joinable()) {
-        _networkThread.join();
-    }
-
-    _gameThread = std::thread([this]() {
-        gameThread(); 
-    });
-    _networkThread = std::thread([this]() {
-        networkThread();
-    }); 
 }

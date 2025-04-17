@@ -3,7 +3,8 @@
 
 GraphicsEngine::GraphicsEngine()
     : _windowWidth(800), _windowHeight(600), _clientId(0), _nbClients(0), 
-      _gameState(PacketModule::WAITING), _jetpackActive(false), _mutex(nullptr)
+      _gameState(PacketModule::WAITING), _jetpackActive(false), _mutex(nullptr),
+      _backgroundScroll(0.0f), _playerAnimFrame(0), _animClock(0.0f)
 {
     _playerPositions.resize(MAX_CLIENTS, std::make_pair(0, 0));
     _playerAlive.resize(MAX_CLIENTS, true);
@@ -30,61 +31,96 @@ bool GraphicsEngine::init(int windowWidth, int windowHeight, const std::string& 
     _gameView.setSize(windowWidth, windowHeight);
     _gameView.setCenter(windowWidth / 2, windowHeight / 2);
     
+    std::cout << "Window created with dimensions: " << windowWidth << "x" << windowHeight << std::endl;
+    
     return _window.isOpen();
 }
 
 bool GraphicsEngine::loadResources()
 {
-    // Charger les textures
-    if (!_textures["player"].loadFromFile("assets/player.png")) {
+    std::cout << "Loading resources..." << std::endl;
+    bool success = true;
+    
+    // Charger la texture du fond
+    if (!_textures["background"].loadFromFile("assets/background.png")) {
+        std::cerr << "Failed to load background texture" << std::endl;
+        success = false;
+    }
+    
+    // Charger les textures des sprites
+    if (!_textures["player"].loadFromFile("assets/player_sprite_sheet.png")) {
         std::cerr << "Failed to load player texture" << std::endl;
-        return false;
+        success = false;
     }
     
-    if (!_textures["otherPlayer"].loadFromFile("assets/player2.png")) {
+    if (!_textures["otherPlayer"].loadFromFile("assets/player_sprite_sheet.png")) {
         std::cerr << "Failed to load other player texture" << std::endl;
-        return false;
+        success = false;
     }
     
-    if (!_textures["wall"].loadFromFile("assets/wall.png")) {
-        std::cerr << "Failed to load wall texture" << std::endl;
-        return false;
-    }
-    
-    if (!_textures["coin"].loadFromFile("assets/coin.png")) {
+    if (!_textures["coin"].loadFromFile("assets/coins_sprite_sheet.png")) {
         std::cerr << "Failed to load coin texture" << std::endl;
-        return false;
+        success = false;
     }
     
-    if (!_textures["electric"].loadFromFile("assets/electric.png")) {
+    if (!_textures["electric"].loadFromFile("assets/zapper_sprite_sheet.png")) {
         std::cerr << "Failed to load electric texture" << std::endl;
-        return false;
+        success = false;
     }
     
-    if (!_textures["finish"].loadFromFile("assets/finish.png")) {
-        std::cerr << "Failed to load finish texture" << std::endl;
-        return false;
+    if (!_textures["wall"].loadFromFile("assets/background.png")) {
+        std::cerr << "Failed to load wall texture (using background as fallback)" << std::endl;
+        // Still continue, we'll use a subsection of the background
     }
     
     // Charger la police
-    if (!_font.loadFromFile("assets/font.ttf")) {
-        std::cerr << "Failed to load font" << std::endl;
-        return false;
+    if (!_font.loadFromFile("assets/jetpack_font.ttf")) {
+        std::cerr << "Failed to load font. Trying default font..." << std::endl;
+        // Try system font as fallback
+        if (!_font.loadFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")) {
+            std::cerr << "Failed to load fallback font" << std::endl;
+            success = false;
+        }
     }
     
-    // Configurer les sprites
+    // Configure background
+    _backgroundSprite.setTexture(_textures["background"]);
+    
+    // Configure player sprite with animation frames
     _playerSprite.setTexture(_textures["player"]);
-    _playerSprite.setScale(1.0f, 1.0f);
+    _playerSprite.setTextureRect(sf::IntRect(0, 0, 48, 48)); // First frame
+    _playerSprite.setScale(1.5f, 1.5f);
     
     _otherPlayerSprite.setTexture(_textures["otherPlayer"]);
-    _otherPlayerSprite.setScale(1.0f, 1.0f);
+    _otherPlayerSprite.setTextureRect(sf::IntRect(0, 0, 48, 48)); // First frame
+    _otherPlayerSprite.setScale(1.5f, 1.5f);
     
+    // Configure other sprites
     _tileSprites[WALL].setTexture(_textures["wall"]);
+    _tileSprites[WALL].setTextureRect(sf::IntRect(0, 100, 32, 32)); // Subsection of background
+    
     _tileSprites[COIN].setTexture(_textures["coin"]);
+    _tileSprites[COIN].setTextureRect(sf::IntRect(0, 0, 16, 16)); // First coin frame
+    _tileSprites[COIN].setScale(2.0f, 2.0f);
+    
     _tileSprites[ELECTRIC].setTexture(_textures["electric"]);
+    _tileSprites[ELECTRIC].setTextureRect(sf::IntRect(0, 0, 16, 48)); // First electric frame
+    _tileSprites[ELECTRIC].setScale(2.0f, 2.0f);
+    
+    // Create a red rectangle for the finish line
+    sf::RectangleShape finishRect(sf::Vector2f(10, TILE_SIZE * 3));
+    finishRect.setFillColor(sf::Color::Red);
+    sf::Texture finishTexture;
+    finishTexture.create(10, TILE_SIZE * 3);
+    finishTexture.update((sf::Uint8*)finishRect.getFillColor().toInteger(), 1, 1, 0, 0);
+    _textures["finish"] = finishTexture;
     _tileSprites[FINISH].setTexture(_textures["finish"]);
     
-    return true;
+    if (success) {
+        std::cout << "Resources loaded successfully" << std::endl;
+    }
+    
+    return success;
 }
 
 void GraphicsEngine::updateGameState(const PacketModule& packet, std::mutex& mutex)
@@ -110,8 +146,10 @@ void GraphicsEngine::setMap(const std::vector<std::vector<TileType>>& map)
     if (_mutex) {
         std::lock_guard<std::mutex> lock(*_mutex);
         _map = map;
+        std::cout << "Map set with size: " << map.size() << "x" << (map.empty() ? 0 : map[0].size()) << std::endl;
     } else {
         _map = map;
+        std::cout << "Map set with size: " << map.size() << "x" << (map.empty() ? 0 : map[0].size()) << " (no mutex)" << std::endl;
     }
 }
 
@@ -127,9 +165,46 @@ bool GraphicsEngine::getJetpackActive() const
 
 void GraphicsEngine::run()
 {
-    while (_window.isOpen()) {
-        handleEvents();
-        render();
+    static sf::Clock frameClock;
+    float deltaTime = frameClock.restart().asSeconds();
+    
+    handleEvents();
+    updateAnimations(deltaTime);
+    render();
+}
+
+void GraphicsEngine::updateAnimations(float deltaTime)
+{
+    // Update player animation frame
+    _animClock += deltaTime;
+    if (_animClock >= 0.1f) { // Change animation frame every 0.1 seconds
+        _animClock = 0.0f;
+        _playerAnimFrame = (_playerAnimFrame + 1) % 4; // 4 frames of animation
+        
+        // Update player sprite texture rect
+        if (_jetpackActive) {
+            // Jetpack animation (row 1)
+            _playerSprite.setTextureRect(sf::IntRect(_playerAnimFrame * 48, 48, 48, 48));
+            _otherPlayerSprite.setTextureRect(sf::IntRect(_playerAnimFrame * 48, 48, 48, 48));
+        } else {
+            // Running animation (row 0)
+            _playerSprite.setTextureRect(sf::IntRect(_playerAnimFrame * 48, 0, 48, 48));
+            _otherPlayerSprite.setTextureRect(sf::IntRect(_playerAnimFrame * 48, 0, 48, 48));
+        }
+        
+        // Update coin animation
+        int coinFrame = (_playerAnimFrame % 4);
+        _tileSprites[COIN].setTextureRect(sf::IntRect(coinFrame * 16, 0, 16, 16));
+        
+        // Update electric hazard animation
+        int electricFrame = (_playerAnimFrame % 2);
+        _tileSprites[ELECTRIC].setTextureRect(sf::IntRect(electricFrame * 16, 0, 16, 48));
+    }
+    
+    // Update background scrolling
+    _backgroundScroll += 100.0f * deltaTime; // Adjust speed as needed
+    if (_backgroundScroll >= _textures["background"].getSize().x) {
+        _backgroundScroll = 0.0f;
     }
 }
 
@@ -160,6 +235,9 @@ void GraphicsEngine::render()
     if (_mutex) {
         std::lock_guard<std::mutex> lock(*_mutex);
         
+        // Dessiner le fond qui défile
+        drawBackground();
+        
         // Dessiner la carte
         drawMap();
         
@@ -173,8 +251,32 @@ void GraphicsEngine::render()
     _window.display();
 }
 
+void GraphicsEngine::drawBackground()
+{
+    // Draw a scrolling background (two copies side by side)
+    float bgWidth = _textures["background"].getSize().x;
+    float bgHeight = _textures["background"].getSize().y;
+    
+    // Scale background to fit window height
+    float scaleFactor = static_cast<float>(_windowHeight) / bgHeight;
+    _backgroundSprite.setScale(scaleFactor, scaleFactor);
+    
+    // Draw first background copy
+    _backgroundSprite.setPosition(-_backgroundScroll, 0);
+    _window.draw(_backgroundSprite);
+    
+    // Draw second background copy
+    _backgroundSprite.setPosition(bgWidth * scaleFactor - _backgroundScroll, 0);
+    _window.draw(_backgroundSprite);
+}
+
 void GraphicsEngine::drawMap()
 {
+    if (_map.empty()) {
+        std::cerr << "Map is empty, nothing to draw" << std::endl;
+        return;
+    }
+    
     for (size_t y = 0; y < _map.size(); ++y) {
         for (size_t x = 0; x < _map[y].size(); ++x) {
             TileType tile = _map[y][x];
@@ -199,8 +301,8 @@ void GraphicsEngine::drawPlayers()
                 _playerSprite.setPosition(x, y);
                 _window.draw(_playerSprite);
                 
-                // Centrer la vue sur le joueur
-                _gameView.setCenter(x, y);
+                // Centrer la vue sur le joueur tout en laissant voir un peu devant
+                _gameView.setCenter(x + _windowWidth/4, _windowHeight/2);
                 _window.setView(_gameView);
             } else {
                 _otherPlayerSprite.setPosition(x, y);
