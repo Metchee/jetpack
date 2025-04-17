@@ -13,15 +13,20 @@ SERVER_DIR = server_src
 CLIENT_DIR = client_src
 SHARED_DIR = shared_include
 
-SERVER_SRC = 	$(SERVER_DIR)/server.cpp 		\
-            	$(SERVER_DIR)/main.cpp 			\
-            	$(SERVER_DIR)/config.cpp 		\
-            	$(SERVER_DIR)/packet.cpp		\
-				$(SERVER_DIR)/sendAssets.cpp	\
+# SFML flags pour le client
+CLIENT_LDFLAGS = $(LDFLAGS) -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio
+
+SERVER_SRC = $(SERVER_DIR)/server.cpp \
+             $(SERVER_DIR)/main.cpp \
+             $(SERVER_DIR)/config.cpp \
+             $(SERVER_DIR)/packet.cpp \
+             $(SERVER_DIR)/sendAssets.cpp \
+             $(SERVER_DIR)/Game.cpp
 
 CLIENT_SRC = $(CLIENT_DIR)/client.cpp \
              $(CLIENT_DIR)/main.cpp \
              $(CLIENT_DIR)/receiveAssets.cpp \
+             $(CLIENT_DIR)/Graphics.cpp \
              $(SERVER_DIR)/packet.cpp
 
 SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
@@ -36,7 +41,7 @@ server: $(SERVER_OBJ)
 	$(CC) $(CFLAGS) -o $(SERVER_NAME) $(SERVER_OBJ) $(LDFLAGS)
 
 client: $(CLIENT_OBJ)
-	$(CC) $(CFLAGS) -o $(CLIENT_NAME) $(CLIENT_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $(CLIENT_NAME) $(CLIENT_OBJ) $(CLIENT_LDFLAGS)
 
 %.o: %.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -49,4 +54,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all clean fclean re
+.PHONY: all clean fclean re server client

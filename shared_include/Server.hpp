@@ -7,6 +7,8 @@
 #include "Config.hpp"
 #include "Packet.hpp"
 #include <unordered_map>
+#include "Game.hpp"
+#include <chrono>
 
 class Server {
     public:
@@ -41,4 +43,21 @@ class Server {
         std::unordered_map<int, PacketModule> _packets;
         std::unordered_map<int, int> _clientIds; 
         ServerConfig config;
+        Game _game;
+        
+        // État du jeu
+        bool _gameStarted;
+        bool _gameWaitingForPlayers;
+        
+        // Horodatage pour le calcul du delta time
+        std::chrono::time_point<std::chrono::high_resolution_clock> _lastUpdateTime;
+        
+        // Méthodes de gestion du jeu
+        void startGame();
+        void updateGame();
+        void sendGameState();
+        void handlePlayerInput(int clientId, const PacketModule& packet);
+        
+        // Envoyer la carte aux clients
+        void sendMapToClient(int clientFd);
 };

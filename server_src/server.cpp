@@ -14,36 +14,23 @@
 #include <errno.h>
 #include <string.h>
 
-Server::Server(int argc, char* argv[]) : _packetsUpdated(false), _serverFd(-1), _nbClients(1)
-{
-    config.parseArgs(argc, argv);
-    config.validate();
-    _serverFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (_serverFd < 0) {
-        throw std::runtime_error("Failed to create socket");
-    }
-    int opt = 1;
-    if (setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        throw std::runtime_error("Failed to set socket options");
-    }
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(config.port);
-    if (bind(_serverFd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        throw std::runtime_error("Failed to bind socket");
-    }
-    if (listen(_serverFd, 10) < 0) {
-        throw std::runtime_error("Failed to listen on socket");
-    }
-    if (config.debug_mode) {
-        std::cout << "[SERVER] Server started on port " << config.port << std::endl;
-    }
-}
 
-Server::~Server()
+Server::Server(int argc, char* argv[]) 
+    : _packetsUpdated(false), _serverFd(-1), _nbClients(1),
+      _gameStarted(false), _gameWaitingForPlayers(true)
 {
-    stop();
+    // ... code existant ...
+    
+    // Charger la carte depuis le fichier spécifié
+    if (!_game.loadMap(config.map_file)) {
+        throw std::runtime_error("Failed to load map file: " + config.map_file);
+    }
+    
+    _lastUpdateTime = std::chrono::high_resolution_clock::now();
+    
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Map loaded successfully from " << config.map_file << std::endl;
+    }
 }
 
 void Server::run()
@@ -62,13 +49,26 @@ void Server::run()
             client_pollfd.events = POLLIN;
             poll_fds.push_back(client_pollfd);
         }
-        int ready = poll(poll_fds.data(), poll_fds.size(), -1);
+        
+        // Poll avec timeout court pour permettre les mises à jour régulières du jeu
+        int ready = poll(poll_fds.data(), poll_fds.size(), 16); // 16ms ~ 60fps
+        
+        // Mettre à jour l'état du jeu
+        if (_gameStarted) {
+            updateGame();
+        } else if (_fdsList.size() >= 2 && _gameWaitingForPlayers) {
+            // Démarrer le jeu si nous avons au moins 2 joueurs
+            startGame();
+        }
+        
         if (ready < 0) {
             if (config.debug_mode) {
                 std::cerr << "[SERVER] Poll error: " << strerror(errno) << std::endl;
             }
             continue;
         }
+        
+        // Traiter les événements de poll
         for (size_t i = 0; i < poll_fds.size(); ++i) {
             if (poll_fds[i].revents & POLLIN) {
                 if (poll_fds[i].fd == _serverFd) {
@@ -78,61 +78,133 @@ void Server::run()
                 }
             }
         }
-    }
-}
-
-void Server::stop()
-{
-    for (auto& client : _fdsList) {
-        close(client->fd);
-    }
-    _fdsList.clear();
-    _clientIds.clear();
-    _packets.clear();
-    if (_serverFd >= 0) {
-        close(_serverFd);
-        _serverFd = -1;
-    }
-    if (config.debug_mode) {
-        std::cout << "[SERVER] Server stopped" << std::endl;
-    }
-}
-
-void Server::handleNewConnection()
-{
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    int client_fd = accept(_serverFd, (struct sockaddr*)&client_addr, &client_len);
-    if (client_fd < 0) {
-        if (config.debug_mode) {
-            std::cerr << "[SERVER] Failed to accept connection" << std::endl;
+        
+        // Envoyer les mises à jour aux clients si nécessaire
+        if (_packetsUpdated) {
+            broadcastPackets();
         }
+    }
+}
+
+void Server::startGame()
+{
+    if (_fdsList.size() < 2) {
+        // On a besoin d'au moins 2 joueurs
         return;
     }
-    int flags = fcntl(client_fd, F_GETFL, 0);
-    fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
-    int client_id = _nbClients++;
-    auto new_pollfd = std::make_shared<pollfd>();
-    new_pollfd->fd = client_fd;
-    new_pollfd->events = POLLIN;
-    _fdsList.push_back(new_pollfd);
-    _clientIds[client_fd] = client_id;
     
-    PacketModule welcomePacket(_nbClients);
-    auto& pkt = welcomePacket.getPacket();
-    pkt.nb_client = _nbClients;
-    pkt.client_id = client_id;
-    pkt.playerState[client_id] = PacketModule::WAITING;
-    pkt.playerPosition[client_id] = std::make_pair(0, 0);
-
-    sendPacket(client_fd, welcomePacket);
-    sendDirectoryList(client_fd, "./assets");
-    _packets.emplace(client_id, welcomePacket);
-    if (config.debug_mode) {
-        char ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_addr.sin_addr, ip, INET_ADDRSTRLEN);
-        std::cout << "[SERVER] New client " << client_id << " from " << ip << std::endl;
+    _game.init();
+    _gameStarted = true;
+    _gameWaitingForPlayers = false;
+    
+    // Envoyer la carte à tous les clients
+    for (auto& client : _fdsList) {
+        if (client->fd != _serverFd) {
+            sendMapToClient(client->fd);
+        }
     }
+    
+    // Initialiser l'horodatage de mise à jour
+    _lastUpdateTime = std::chrono::high_resolution_clock::now();
+    
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Game started with " << _fdsList.size() - 1 << " players" << std::endl;
+    }
+    
+    // Mettre à jour les paquets pour indiquer que le jeu a commencé
+    for (auto& pair : _packets) {
+        auto& pkt = pair.second.getPacket();
+        pkt.playerState[pair.first] = PacketModule::PLAYING;
+    }
+    
+    _packetsUpdated = true;
+}
+
+void Server::updateGame()
+{
+    // Calculer le delta time
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float deltaTime = std::chrono::duration<float>(currentTime - _lastUpdateTime).count();
+    _lastUpdateTime = currentTime;
+    
+    // Limiter deltaTime pour éviter les sauts trop grands
+    if (deltaTime > 0.1f) {
+        deltaTime = 0.1f;
+    }
+    
+    // Mettre à jour l'état du jeu
+    _game.update(deltaTime);
+    
+    // Vérifier si le jeu est terminé
+    if (_game.isGameOver()) {
+        int winner = _game.getWinner();
+        
+        // Mettre à jour les paquets pour indiquer que le jeu est terminé
+        for (auto& pair : _packets) {
+            auto& pkt = pair.second.getPacket();
+            pkt.playerState[pair.first] = PacketModule::ENDED;
+            
+            // Marquer le gagnant si applicable
+            if (winner != -1 && pair.first == winner) {
+                // On pourrait ajouter un état spécial pour le gagnant
+                // Pour l'instant, on garde simplement ENDED
+            }
+        }
+        
+        // Réinitialiser l'état du jeu pour la prochaine partie
+        _gameStarted = false;
+        _gameWaitingForPlayers = true;
+        
+        if (config.debug_mode) {
+            if (winner != -1) {
+                std::cout << "[SERVER] Game over. Player " << winner + 1 << " wins!" << std::endl;
+            } else {
+                std::cout << "[SERVER] Game over. No winner." << std::endl;
+            }
+        }
+    }
+    
+    // Mettre à jour les paquets avec le nouvel état du jeu
+    for (auto& pair : _packets) {
+        auto clientId = pair.first;
+        auto& pkt = pair.second.getPacket();
+        
+        // Mettre à jour la position du joueur
+        const auto& player = _game.getPlayer(clientId);
+        pkt.playerPosition[clientId] = std::make_pair(
+            static_cast<int>(player.x * 100), // Multiplier par 100 pour conserver la précision
+            static_cast<int>(player.y * 100)
+        );
+        
+        // Mettre à jour le score du joueur (si on ajoute un champ score au paquet)
+        // pkt.playerScore[clientId] = player.score;
+    }
+    
+    _packetsUpdated = true;
+    
+    // Envoyer l'état du jeu aux clients
+    sendGameState();
+}
+
+void Server::sendGameState()
+{
+    // Envoyer les paquets mis à jour à tous les clients
+    broadcastPackets();
+}
+
+void Server::handlePlayerInput(int clientId, const PacketModule& packet)
+{
+    if (!_gameStarted || clientId < 0 || clientId >= MAX_CLIENTS) {
+        return;
+    }
+    
+    // Extraire les informations d'entrée du paquet
+    // NOTE: On pourrait ajouter un champ jetpackActive au paquet
+    // Pour l'instant, on utilise une valeur factice
+    bool jetpackActive = false; // À remplacer par packet.getJetpackActive();
+    
+    // Mettre à jour le joueur
+    _game.updatePlayer(clientId, jetpackActive, 0.016f); // 16ms ~ 60fps
 }
 
 void Server::handleClientData(int client_fd)
@@ -150,93 +222,37 @@ void Server::handleClientData(int client_fd)
         removeClient(client_fd);
         return;
     }
+    
+    int clientId = it->second;
+    
+    // Traiter les entrées du joueur
+    handlePlayerInput(clientId, pkt);
+    
     if (config.debug_mode) {
-        std::cout << "[SERVER] Successfully received packet from client " << it->second << std::endl;
+        std::cout << "[SERVER] Successfully received packet from client " << clientId << std::endl;
     }
-    _packets.insert_or_assign(it->second, pkt);
+    
+    _packets.insert_or_assign(clientId, pkt);
     _packetsUpdated = true;
 }
 
-void Server::removeClient(int client_fd)
+void Server::sendMapToClient(int clientFd)
 {
-    int client_id = -1;
-    auto id_it = _clientIds.find(client_fd);
-
-    if (id_it != _clientIds.end()) {
-        client_id = id_it->second;
-    }
-    for (auto it = _fdsList.begin(); it != _fdsList.end(); ++it) {
-        if ((*it)->fd == client_fd) {
-            _fdsList.erase(it);
-            break;
-        }
-    }
-    _clientIds.erase(client_fd);
-    if (client_id != -1) {
-        _packets.erase(client_id);
-    }
-    close(client_fd);
+    // TODO: Implémenter l'envoi de la carte au client
+    // Cette méthode devrait envoyer les données de la carte au client spécifié
+    // Elle pourrait utiliser un paquet spécial ou un format de données personnalisé
+    
+    // Exemple simple:
+    PacketModule mapPacket(_nbClients);
+    auto& pkt = mapPacket.getPacket();
+    
+    // On pourrait ajouter des champs spécifiques à la carte dans le paquet
+    // Pour l'instant, on marque simplement l'état du joueur comme WAITING
+    pkt.playerState[_clientIds[clientFd]] = PacketModule::WAITING;
+    
+    sendPacket(clientFd, mapPacket);
+    
     if (config.debug_mode) {
-        std::cout << "[SERVER] Client disconnected (fd: " << client_fd << ")" << std::endl;
+        std::cout << "[SERVER] Sent map to client " << _clientIds[clientFd] << std::endl;
     }
-    _nbClients--;
-}
-
-int Server::sendPacket(int client_fd, PacketModule &packetModule)
-{
-    const auto& pkt = packetModule.getPacket();
-    int bytes_sent = send(client_fd, &pkt, sizeof(pkt), 0);
-
-    if (bytes_sent < 0) {
-        if (config.debug_mode) {
-            std::cerr << "[SERVER] Failed to send packet to client " << client_fd << std::endl;
-        }
-        removeClient(client_fd);
-    }
-    if (config.debug_mode) {
-        packetModule.display("[SERVER]");
-    }
-    return bytes_sent;
-}
-
-bool Server::readPacket(int client_fd, PacketModule &packetModule)
-{
-    if (config.debug_mode) {
-        std::cout << "[SERVER] Reading packet from client " << client_fd << std::endl;
-    }
-    auto& pkt = packetModule.getPacket();
-    ssize_t bytes_read = recv(client_fd, &pkt, sizeof(pkt), MSG_WAITALL);
-
-    if (bytes_read <= 0) {
-        if (config.debug_mode) {
-            std::cerr << "[SERVER] Failed to read packet from client " << client_fd << std::endl;
-        }
-        return false;
-    }
-    if (static_cast<size_t>(bytes_read) != sizeof(pkt)) {
-        if (config.debug_mode) {
-            std::cerr << "[SERVER] Incomplete packet received from client " << client_fd << std::endl;
-        }
-        return false;
-    }
-    if (config.debug_mode) {
-        std::cout << "\n[SERVER] Received packet from client " << client_fd << std::endl;
-    }
-    return true;
-}
-
-void Server::broadcastPackets()
-{
-    if (!_packetsUpdated)
-        return;
-
-    for (auto& client : _fdsList) {
-        if (client->fd != _serverFd) {
-            auto it = _clientIds.find(client->fd);
-            if (it != _clientIds.end()) {
-                sendPacket(client->fd, _packets[it->second]);
-            }
-        }
-    }
-    _packetsUpdated = false;
 }
