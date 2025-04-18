@@ -122,6 +122,22 @@ void Server::handleNewConnection()
     _fdsList.push_back(new_pollfd);
     _clientIds[client_fd] = client_id;
     
+    if (_nbClients >= 3) {  // Au moins 2 clients (nbClients commence à 1)
+    // Définir tous les joueurs connectés en mode PLAYING
+    for (auto& clientPair : _clientIds) {
+        int clientId = clientPair.second;
+        _packets[clientId].getPacket().playerState[clientId] = PacketModule::PLAYING;
+    }
+    // Marquer les paquets comme mis à jour pour qu'ils soient diffusés
+    _packetsUpdated = true;
+    
+    // Diffuser les paquets mis à jour
+    broadcastPackets();
+    
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Game started with " << (_nbClients - 1) << " players" << std::endl;
+    }
+    }
     // Create a packet for the new client
     PacketModule welcomePacket(_nbClients);
     auto& pkt = welcomePacket.getPacket();
