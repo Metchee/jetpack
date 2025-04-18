@@ -181,7 +181,6 @@ void Server::handleNewConnection()
         for (auto& packetPair : _packets) {
             int cid = packetPair.first;
             packetPair.second.getPacket().playerState[cid] = PacketModule::PLAYING;
-            packetPair.second.getPacket().nb_client = _nbClients; // Forcer nb_client
             if (config.debug_mode) {
                 std::cout << "[SERVER] Setting client " << cid << " to PLAYING" << std::endl;
             }
@@ -189,8 +188,6 @@ void Server::handleNewConnection()
         if (config.debug_mode) {
             std::cout << "[SERVER] Game started with " << _nbClients << " players" << std::endl;
         }
-        _packetsUpdated = true;
-        broadcastPackets(); // Diffusion immédiate pour synchroniser les états
     }
 
     _packetsUpdated = true;
@@ -293,36 +290,29 @@ void Server::broadcastPackets()
     if (!_packetsUpdated)
         return;
 
-    // Vérifier l'état de _packets avant la diffusion
-    if (config.debug_mode) {
-        std::cout << "[SERVER] Preparing to broadcast, _nbClients: " << _nbClients << std::endl;
-        for (const auto& packetPair : _packets) {
-            std::cout << "[SERVER] Packet for client " << packetPair.first 
-                      << ": nb_client = " << packetPair.second.getPacket().nb_client 
-                      << ", state = " << packetPair.second.getPacket().playerState[packetPair.first] << std::endl;
+    // Mettre à jour tous les paquets dans _packets avant la diffusion
+    for (auto& packetPair : _packets) {
+        packetPair.second.getPacket().nb_client = _nbClients;
+        for (int i = 0; i < _nbClients; ++i) {
+            if (_packets.find(i) != _packets.end()) {
+                packetPair.second.getPacket().playerPosition[i] = _packets[i].getPacket().playerPosition[i];
+                packetPair.second.getPacket().playerState[i] = _packets[i].getPacket().playerState[i];
+            }
         }
     }
 
-    // Diffuser les paquets
+    // Diffuser les paquets mis à jour
     for (auto& client : _fdsList) {
         if (client->fd != _serverFd) {
             auto it = _clientIds.find(client->fd);
             if (it != _clientIds.end()) {
                 int clientId = it->second;
                 PacketModule packet = _packets[clientId]; // Copie du paquet
-                auto& pkt = packet.getPacket();
-                pkt.nb_client = _nbClients; // Forcer la mise à jour
-                for (int i = 0; i < _nbClients; ++i) {
-                    if (_packets.find(i) != _packets.end()) {
-                        pkt.playerPosition[i] = _packets[i].getPacket().playerPosition[i];
-                        pkt.playerState[i] = _packets[i].getPacket().playerState[i];
-                    }
-                }
                 if (config.debug_mode) {
                     std::cout << "[SERVER] Broadcasting to client " << clientId 
-                              << " (fd: " << client->fd << "), nb_client: " << pkt.nb_client 
-                              << ", client_id: " << pkt.client_id 
-                              << ", state: " << pkt.playerState[clientId] << std::endl;
+                              << " (fd: " << client->fd << "), nb_client: " << packet.getPacket().nb_client 
+                              << ", client_id: " << packet.getPacket().client_id 
+                              << ", state: " << packet.getPacket().playerState[clientId] << std::endl;
                 }
                 sendPacket(client->fd, packet);
             }
