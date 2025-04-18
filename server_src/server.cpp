@@ -171,7 +171,7 @@ void Server::handleNewConnection()
     pkt.nb_client = _nbClients;
     pkt.client_id = client_id;
     pkt.playerState[client_id] = PacketModule::WAITING;
-    pkt.playerPosition[client_id] = std::make_pair(100, WINDOW_HEIGHT / 2);
+    pkt.playerPosition[client_id] = std::make_pair(100, 600 / 2);
 
     // Load the map file into the packet
     std::ifstream mapFile(config.map_file);
