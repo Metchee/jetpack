@@ -85,13 +85,12 @@ void Server::run()
 
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_broadcast).count();
-        if (_packetsUpdated && elapsed >= 50) {
+        if (_packetsUpdated && elapsed >= 30) { // Réduit à 30ms
             broadcastPackets();
             last_broadcast = now;
         }
     }
 }
-
 void Server::stop()
 {
     for (auto& client : _fdsList) {
@@ -167,6 +166,7 @@ void Server::handleNewConnection()
         for (int i = 0; i < _nbClients; ++i) {
             if (_packets.find(i) != _packets.end()) {
                 packetPair.second.getPacket().playerPosition[i] = _packets[i].getPacket().playerPosition[i];
+                packetPair.second.getPacket().playerState[i] = _packets[i].getPacket().playerState[i];
             }
         }
     }
