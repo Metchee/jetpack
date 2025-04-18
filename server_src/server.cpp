@@ -15,7 +15,7 @@
 #include <string.h>
 #include <chrono>
 
-Server::Server(int argc, char* argv[]) : _packetsUpdated(false), _serverFd(-1), _nbClients(1)
+Server::Server(int argc, char* argv[]) : _packetsUpdated(false), _serverFd(-1), _nbClients(0)
 {
     config.parseArgs(argc, argv);
     config.validate();
@@ -124,6 +124,10 @@ void Server::handleNewConnection()
     fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
 
     int client_id = _nbClients++;
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Assigning client_id: " << client_id << " to fd: " << client_fd << std::endl;
+    }
+
     auto new_pollfd = std::make_shared<pollfd>();
     new_pollfd->fd = client_fd;
     new_pollfd->events = POLLIN;
@@ -144,6 +148,10 @@ void Server::handleNewConnection()
     mapFile.read(pkt.map, file_size);
     pkt.map[file_size] = '\0';
 
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Sending welcome packet to client " << client_id 
+                  << " with nb_client: " << pkt.nb_client << std::endl;
+    }
     sendPacket(client_fd, welcomePacket);
     _packets.emplace(client_id, welcomePacket);
 
@@ -173,13 +181,14 @@ void Server::handleNewConnection()
             }
         }
         if (config.debug_mode) {
-            std::cout << "[SERVER] Game started with " << (_nbClients - 1) << " players" << std::endl;
+            std::cout << "[SERVER] Game started with " << _nbClients << " players" << std::endl;
         }
     }
 
     _packetsUpdated = true;
     broadcastPackets();
 }
+
 void Server::handleClientData(int client_fd)
 {
     if (config.debug_mode) {
@@ -281,12 +290,20 @@ void Server::broadcastPackets()
             auto it = _clientIds.find(client->fd);
             if (it != _clientIds.end()) {
                 int clientId = it->second;
-                PacketModule& packet = _packets[clientId];
-                packet.getPacket().nb_client = _nbClients; // Assurez-vous que nb_client est à jour
+                PacketModule packet = _packets[clientId]; // Copie du paquet pour ce client
+                auto& pkt = packet.getPacket();
+                pkt.nb_client = _nbClients;
+                // Mettre à jour les positions de tous les joueurs
+                for (int i = 0; i < _nbClients; ++i) {
+                    if (_packets.find(i) != _packets.end()) {
+                        pkt.playerPosition[i] = _packets[i].getPacket().playerPosition[i];
+                    }
+                }
                 if (config.debug_mode) {
                     std::cout << "[SERVER] Broadcasting to client " << clientId 
-                              << " (fd: " << client->fd << "), nb_client: " << _nbClients 
-                              << ", state: " << packet.getPacket().playerState[clientId] << std::endl;
+                              << " (fd: " << client->fd << "), nb_client: " << pkt.nb_client 
+                              << ", client_id: " << pkt.client_id 
+                              << ", state: " << pkt.playerState[clientId] << std::endl;
                 }
                 sendPacket(client->fd, packet);
             }

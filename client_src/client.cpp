@@ -116,7 +116,6 @@ void ClientModule::Client::networkThread()
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     while (connected && !g_shutdown) {
         int result = recv(fd, &incomingPacket, sizeof(PacketModule::Packet), MSG_DONTWAIT);
-        
         if (result > 0) {
             if (debugMode) {
                 std::lock_guard<std::mutex> lock(_packetMutex);
@@ -137,6 +136,11 @@ void ClientModule::Client::networkThread()
                     id = incomingPacket.getClientId();
                     if (debugMode) {
                         std::cout << "[CLIENT] Assigned client ID: " << id << std::endl;
+                    }
+                } else if (id != incomingPacket.getClientId()) {
+                    if (debugMode) {
+                        std::cerr << "[CLIENT] Warning: Received unexpected client_id " 
+                                << incomingPacket.getClientId() << ", expected " << id << std::endl;
                     }
                 }
                 
