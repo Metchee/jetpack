@@ -11,6 +11,7 @@ LDFLAGS = -lpthread
 
 # Server
 SERVER_DIR = server_src
+SHARED_DIR = shared_include
 SERVER_SRC = 	$(SERVER_DIR)/server.cpp \
 				$(SERVER_DIR)/main.cpp \
 				$(SERVER_DIR)/config.cpp \
@@ -38,7 +39,7 @@ CLIENT_NAME = jetpack_client
 CLIENT_LDFLAGS = $(LDFLAGS) -lsfml-graphics -lsfml-window -lsfml-system
 
 # All
-all: server client
+all: assets server client
 
 # Server
 server: $(SERVER_OBJ)
@@ -67,14 +68,4 @@ fclean: clean
 # Rebuild
 re: fclean all
 
-# Create directories and placeholder files for tests
-prepare_tests:
-	mkdir -p tests
-	touch tests/test_server.cpp tests/test_client.cpp
-
-# Run tests
-tests_run: prepare_tests
-	$(CC) $(CFLAGS) -o unit_tests tests/test_server.cpp tests/test_client.cpp
-	./unit_tests
-
-.PHONY: all clean fclean re server client tests_run prepare_tests assets
+.PHONY: all clean fclean re server client assets
