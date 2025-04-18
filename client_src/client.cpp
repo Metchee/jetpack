@@ -5,6 +5,8 @@
 #include <arpa/inet.h>
 #include <stdexcept>
 #include <iostream>
+#include <sstream>
+#include <SFML/Graphics.hpp>
 
 void ClientModule::Client::parseArguments(int argc, const char *argv[])
 {
@@ -21,16 +23,39 @@ void ClientModule::Client::parseArguments(int argc, const char *argv[])
 }
 
 ClientModule::Client::Client(int ac, const char *av[]) :
-    fd(-1), id(-1), serverPort(-1), serverIp(""), connected(false)
+    fd(-1), id(-1), serverPort(-1), serverIp(""), connected(false),
+    window(sf::VideoMode(800, 600), "Jetpack Game"),
+    mapWidth(0), mapHeight(0)
 {
     parseArguments(ac, av);
+    if (!font.loadFromFile("assets/jetpack_font.ttf")) {
+        throw std::runtime_error("Failed to load font");
+    }
+    if (!playerTexture.loadFromFile("assets/player_sprite_sheet.png")) {
+        throw std::runtime_error("Failed to load player texture");
+    }
+    if (!coinTexture.loadFromFile("assets/coins_sprite_sheet.png")) {
+        throw std::runtime_error("Failed to load coin texture");
+    }
+    if (!zapperTexture.loadFromFile("assets/zapper_sprite_sheet.png")) {
+        throw std::runtime_error("Failed to load zapper texture");
+    }
+    playerSprite.setTexture(playerTexture);
+    coinSprite.setTexture(coinTexture);
+    zapperSprite.setTexture(zapperTexture);
+    playerSprite.setScale(0.5f, 0.5f);
+    coinSprite.setScale(0.5f, 0.5f);
+    zapperSprite.setScale(0.5f, 0.5f);
+    window.setFramerateLimit(60);
 }
 
 ClientModule::Client::~Client() {
     if (connected) {
         close(fd);
     }
+    window.close();
 }
+
 void ClientModule::Client::run()
 {
     fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -57,6 +82,7 @@ void ClientModule::Client::run()
 
 void ClientModule::Client::stop() {
     connected = false;
+    window.close();
 }
 
 std::string ClientModule::Client::getAddress() const {
@@ -65,23 +91,91 @@ std::string ClientModule::Client::getAddress() const {
     return std::string(ip) + ":" + std::to_string(ntohs(address.sin_port));
 }
 
-void ClientModule::Client::gameThread(/* Game structure*/)
+void ClientModule::Client::gameThread()
 {
-    while(connected) {
-        // get player_input = getPlayerInput();
+    auto parseMap = [&](const char* mapData) {
+        std::stringstream ss(mapData);
+        std::string line;
+        map.clear();
+        while (std::getline(ss, line)) {
+            std::vector<char> row(line.begin(), line.end());
+            map.push_back(row);
+        }
+        mapHeight = map.size();
+        mapWidth = map.empty() ? 0 : map[0].size();
+    };
+
+    while (connected && window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) {
+                stop();
+            }
+        }
+
         PacketModule current_state;
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
             current_state.setPacket(packet.getPacket());
         }
-        // if (debugMode) {
-        //     std::lock_guard<std::mutex> lock(_packetMutex);
-        //     current_state.display("[CLIENT] Game");
-        // }
-        // renderGame(current_state);
+        if (map.empty()) {
+            parseMap(current_state.getPacket().map);
+        }
+
+        window.clear(sf::Color::Black);
+
+        const float tileSize = 32.0f;
+        for (int y = 0; y < mapHeight; ++y) {
+            for (int x = 0; x < mapWidth; ++x) {
+                char tile = map[y][x];
+                if (tile == 'C') { 
+                    coinSprite.setPosition(x * tileSize, y * tileSize);
+                    window.draw(coinSprite);
+                } else if (tile == 'E') {
+                    zapperSprite.setPosition(x * tileSize, y * tileSize);
+                    window.draw(zapperSprite);
+                }
+            }
+        }
+
+        for (int i = 0; i < current_state.getNbClient(); ++i) {
+            if (current_state.getPacket().playerState[i] == PacketModule::PLAYING) {
+                auto pos = current_state.getPacket().playerPosition[i];
+                playerSprite.setPosition(pos.first * tileSize, pos.second * tileSize);
+                window.draw(playerSprite);
+            }
+        }
+
+        sf::Text debugText;
+        debugText.setFont(font);
+        debugText.setCharacterSize(20);
+        debugText.setFillColor(sf::Color::White);
+        std::stringstream debugInfo;
+        debugInfo << "Client ID: " << current_state.getClientId() << "\n"
+                  << "Players: " << current_state.getNbClient() << "\n"
+                  << "State: " << current_state.getstate() << "\n"
+                  << "Position: (" << current_state.getPosition().first << ", "
+                  << current_state.getPosition().second << ")";
+        debugText.setString(debugInfo.str());
+        debugText.setPosition(10, 10);
+        if (debugMode) {
+            window.draw(debugText);
+        }
+
+        if (current_state.getstate() == PacketModule::ENDED) {
+            sf::Text endText;
+            endText.setFont(font);
+            endText.setCharacterSize(30);
+            endText.setFillColor(sf::Color::Red);
+            endText.setString("Game Over");
+            endText.setPosition(window.getSize().x / 2 - 100, window.getSize().y / 2);
+            window.draw(endText);
+        }
+
+        window.display();
     }
-    
 }
+
 void ClientModule::Client::networkThread()
 {
     PacketModule newGameState;
@@ -115,7 +209,6 @@ void ClientModule::Client::networkThread()
     }
 }
 
-
 void ClientModule::Client::startThread()
 {
     try {
@@ -135,11 +228,4 @@ void ClientModule::Client::runThread()
     if (_networkThread.joinable()) {
         _networkThread.join();
     }
-
-    _gameThread = std::thread([this]() {
-        gameThread(); 
-    });
-    _networkThread = std::thread([this]() {
-        networkThread();
-    }); 
 }

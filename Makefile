@@ -8,6 +8,7 @@
 CC = g++
 CFLAGS = -Wall -Wextra -std=c++17 -Ishared_include
 LDFLAGS = -lpthread
+SFML_LIBS = -lsfml-graphics -lsfml-window -lsfml-system
 
 SERVER_DIR = server_src
 CLIENT_DIR = client_src
@@ -20,9 +21,6 @@ SERVER_SRC = 	$(SERVER_DIR)/server.cpp 		\
 
 CLIENT_SRC = $(CLIENT_DIR)/client.cpp \
              $(CLIENT_DIR)/main.cpp \
-             $(CLIENT_DIR)/receiveAssets.cpp \
-             $(CLIENT_DIR)/graphics.cpp \
-             $(CLIENT_DIR)/game.cpp \
              $(SERVER_DIR)/packet.cpp
 
 SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
@@ -31,15 +29,13 @@ CLIENT_OBJ = $(CLIENT_SRC:.cpp=.o)
 SERVER_NAME = jetpack_server
 CLIENT_NAME = jetpack_client
 
-CLIENT_LDFLAGS = -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio
-
 all: server client
 
 server: $(SERVER_OBJ)
 	$(CC) $(CFLAGS) -o $(SERVER_NAME) $(SERVER_OBJ) $(LDFLAGS)
 
 client: $(CLIENT_OBJ)
-	$(CC) $(CFLAGS) -o $(CLIENT_NAME) $(CLIENT_OBJ) $(LDFLAGS) $(CLIENT_LDFLAGS)
+	$(CC) $(CFLAGS) -o $(CLIENT_NAME) $(CLIENT_OBJ) $(LDFLAGS) $(SFML_LIBS)
 
 %.o: %.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
