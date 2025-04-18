@@ -7,10 +7,13 @@
 #include <arpa/inet.h>
 #include <thread>
 #include <vector>
+#include <memory>
 #include "Error.hpp"
 
-
 namespace ClientModule {
+    class Game;
+    class Graphics;
+
     class Client {
         public:
             struct ReceivedFileInfo {
@@ -35,7 +38,6 @@ namespace ClientModule {
             void gameThread();
             void networkThread();
             void startThread();
-            void runThread();
             std::mutex _packetMutex;
        private:
             std::thread _gameThread;
@@ -49,5 +51,7 @@ namespace ClientModule {
             sockaddr_in address;
             bool connected;
             bool debugMode;
+            std::shared_ptr<Game> _game;
+            std::shared_ptr<Graphics> _graphics;
     };
 };
