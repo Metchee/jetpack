@@ -142,7 +142,7 @@ void Server::handleNewConnection()
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
-    // accept new connection
+    // Accept new connection
     int client_fd = accept(_serverFd, (struct sockaddr*)&client_addr, &client_len);
     if (client_fd < 0) {
         if (config.debug_mode) {
@@ -150,6 +150,7 @@ void Server::handleNewConnection()
         }
         return;
     }
+
     // Set the client socket to non-blocking mode
     int flags = fcntl(client_fd, F_GETFL, 0);
     fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
@@ -158,16 +159,19 @@ void Server::handleNewConnection()
     auto new_pollfd = std::make_shared<pollfd>();
     new_pollfd->fd = client_fd;
     new_pollfd->events = POLLIN;
-    _fdsList.push_back(new_pollfd);
-    _clientIds[client_fd] = client_id;
-    
+    {
+        std::lock_guard<std::mutex> lock(_clientsMutex);
+        _fdsList.push_back(new_pollfd);
+        _clientIds[client_fd] = client_id;
+    }
+
     // Create a packet for the new client
     PacketModule welcomePacket(_nbClients);
     auto& pkt = welcomePacket.getPacket();
     pkt.nb_client = _nbClients;
     pkt.client_id = client_id;
     pkt.playerState[client_id] = PacketModule::WAITING;
-    pkt.playerPosition[client_id] = std::make_pair(0, 0);
+    pkt.playerPosition[client_id] = std::make_pair(100, WINDOW_HEIGHT / 2);
 
     // Load the map file into the packet
     std::ifstream mapFile(config.map_file);
@@ -183,19 +187,34 @@ void Server::handleNewConnection()
     mapFile.read(pkt.map, file_size);
     pkt.map[file_size] = '\0';
 
-    // send first packet to client
+    // Update game state based on number of clients
+    if (_nbClients >= 2) {
+        for (int i = 0; i < MAX_CLIENTS; ++i) {
+            pkt.playerState[i] = PacketModule::PLAYING;
+        }
+    }
+
+    // Send welcome packet to the new client
     if (sendPacket(client_fd, welcomePacket) < 0) {
         removeClient(client_fd);
         return;
     }
 
-    sendPacket(client_fd, welcomePacket);
-    _packets.emplace(client_id, welcomePacket);
+    // Store the packet and mark packets as updated
+    {
+        std::lock_guard<std::mutex> lock(_clientsMutex);
+        _packets.emplace(client_id, welcomePacket);
+        _packetsUpdated = true;
+    }
+
     if (config.debug_mode) {
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, ip, INET_ADDRSTRLEN);
         std::cout << "[SERVER] New client " << client_id << " from " << ip << std::endl;
     }
+
+    // Broadcast updated state to all clients
+    broadcastPackets();
 }
 
 void Server::handleClientData(int client_fd)
@@ -304,16 +323,55 @@ bool Server::readPacket(int client_fd, PacketModule &packetModule)
 
 void Server::broadcastPackets()
 {
-    // check if packets have been updated
-    if (!_packetsUpdated)
-        return;
+    // Consolidate all client data into a single packet
+    PacketModule broadcastPacket(_nbClients);
+    auto& pkt = broadcastPacket.getPacket();
+    pkt.nb_client = _nbClients;
 
-    // send packets to all clients
+    // Update game state based on number of clients
+    if (_nbClients >= 2) {
+        for (int i = 0; i < MAX_CLIENTS; ++i) {
+            pkt.playerState[i] = PacketModule::PLAYING;
+        }
+    } else {
+        for (int i = 0; i < MAX_CLIENTS; ++i) {
+            pkt.playerState[i] = PacketModule::WAITING;
+        }
+    }
+
+    // Copy map data (assuming it's the same for all clients)
+    std::ifstream mapFile(config.map_file);
+    if (mapFile) {
+        mapFile.seekg(0, std::ios::end);
+        std::streamsize file_size = mapFile.tellg();
+        mapFile.seekg(0, std::ios::beg);
+        if (file_size < MAP_SIZE) {
+            mapFile.read(pkt.map, file_size);
+            pkt.map[file_size] = '\0';
+        }
+    }
+
+    // Update player positions and states from _packets
+    {
+        std::lock_guard<std::mutex> lock(_clientsMutex);
+        for (const auto& [client_id, packet] : _packets) {
+            pkt.playerPosition[client_id] = packet.getPosition();
+            pkt.playerState[client_id] = packet.getstate();
+        }
+    }
+
+    // Send the consolidated packet to all clients
     for (auto& client : _fdsList) {
         if (client->fd != _serverFd) {
             auto it = _clientIds.find(client->fd);
             if (it != _clientIds.end()) {
-                sendPacket(client->fd, _packets[it->second]);
+                pkt.client_id = it->second; // Set the client_id for the receiving client
+                if (sendPacket(client->fd, broadcastPacket) < 0) {
+                    removeClient(client->fd);
+                } else if (config.debug_mode) {
+                    std::cout << "[SERVER] Broadcast packet to client " << it->second << std::endl;
+                    broadcastPacket.display("[SERVER] Broadcast: ");
+                }
             }
         }
     }
