@@ -40,6 +40,7 @@ class PacketModule {
         void display(std::string info);
         void setPacket(const struct Packet& pkt);
         Packet& getPacket() { return pkt; }
+        const Packet& getPacket() const { return pkt; }  // Ajout d'une version const
         int getNbClient() const;
         int getClientId() const;
         gameState getstate() const;
