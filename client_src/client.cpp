@@ -127,7 +127,28 @@ void ClientModule::Client::networkThread() {
                     }
                 }
                 
+                // Copy all data from incoming packet, but preserve local player position
+                auto localPos = packet.getPacket().playerPosition[id];
                 packet = incomingPacket;
+                
+                // Only override local position if game state changed from WAITING to PLAYING
+                if (incomingPacket.getstate() == PacketModule::PLAYING && 
+                    packet.getstate() == PacketModule::WAITING) {
+                    // We're transitioning to PLAYING, keep position
+                } else if (incomingPacket.getstate() == PacketModule::WAITING) {
+                    // Reset position if in WAITING state
+                    packet.getPacket().playerPosition[id] = std::make_pair(100, 300);
+                } else {
+                    // Otherwise use local position in PLAYING state
+                    packet.getPacket().playerPosition[id] = localPos;
+                }
+                
+                if (debugMode) {
+                    if (incomingPacket.getstate() == PacketModule::PLAYING && 
+                        packet.getstate() == PacketModule::WAITING) {
+                        std::cout << "[CLIENT] Game state changed to PLAYING!" << std::endl;
+                    }
+                }
             }
         } else if (result == -1) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -168,7 +189,6 @@ void ClientModule::Client::networkThread() {
         std::cout << "[CLIENT] Network thread stopped" << std::endl;
     }
 }
-
 void ClientModule::Client::startThread() {
     if (debugMode) {
         std::cout << "[CLIENT] Starting threads" << std::endl;

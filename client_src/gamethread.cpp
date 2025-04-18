@@ -210,13 +210,16 @@ void ClientModule::Client::gameThread()
                 electricSprite.update(deltaTime);
             }
         }
+        
         PacketModule current_state;
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
             current_state = packet;
         }
+        
         int playerId = current_state.getClientId();
         auto gameState = current_state.getstate();
+        
         if (!mapParsed && std::strlen(current_state.getPacket().map) > 0) {
             std::string mapData = current_state.getPacket().map;
             mapParsed = true;
@@ -301,40 +304,58 @@ void ClientModule::Client::gameThread()
                 }
             }
         }
+
+        // Check for other players and update their positions
         if (playerId < current_state.getNbClient()) {
             auto myPos = current_state.getPosition();
             playerPosition.x = myPos.first;
             playerPosition.y = myPos.second;
-            int otherPlayerId = (playerId == 0) ? 1 : 0;
-            if (otherPlayerId < current_state.getNbClient()) {
-                auto otherPos = current_state.getPacket().playerPosition[otherPlayerId];
-                otherPlayerPosition.x = otherPos.first;
-                otherPlayerPosition.y = otherPos.second;
+            
+            // Check for other players and update their positions
+            for (int i = 0; i < current_state.getNbClient(); i++) {
+                if (i != playerId) {
+                    auto otherPos = current_state.getPacket().playerPosition[i];
+                    otherPlayerPosition.x = otherPos.first;
+                    otherPlayerPosition.y = otherPos.second;
+                    
+                    if (debugMode) {
+                        std::cout << "[CLIENT] Other player position: (" << otherPos.first 
+                                  << ", " << otherPos.second << ")" << std::endl;
+                    }
+                }
             }
         }
-        if (isJumping) {
-            verticalVelocity = JUMP_FORCE;
+
+        // Only update position if the game state is PLAYING
+        if (gameState == PacketModule::PLAYING) {
+            if (isJumping) {
+                verticalVelocity = JUMP_FORCE;
+            } else {
+                verticalVelocity += GRAVITY;
+            }
+            
+            playerPosition.y += verticalVelocity;
+            playerPosition.x += HORIZONTAL_SCROLL_SPEED;
+            if (playerPosition.y < 0) {
+                playerPosition.y = 0;
+                verticalVelocity = 0;
+            } else if (playerPosition.y > WINDOW_HEIGHT - PLAYER_SIZE) {
+                playerPosition.y = WINDOW_HEIGHT - PLAYER_SIZE;
+                verticalVelocity = 0;
+            }
+            mapOffset = playerPosition.x - 100.0f;
+            {
+                std::lock_guard<std::mutex> lock(_packetMutex);
+                packet.getPacket().playerPosition[playerId] = std::make_pair(
+                    static_cast<int>(playerPosition.x), 
+                    static_cast<int>(playerPosition.y)
+                );
+            }
         } else {
-            verticalVelocity += GRAVITY;
+            // In WAITING state, keep player at initial position
+            mapOffset = 0.0f;
         }
         
-        playerPosition.y += verticalVelocity;
-        playerPosition.x += HORIZONTAL_SCROLL_SPEED;
-        if (playerPosition.y < 0) {
-            playerPosition.y = 0;
-            verticalVelocity = 0;
-        } else if (playerPosition.y > WINDOW_HEIGHT - PLAYER_SIZE) {
-            playerPosition.y = WINDOW_HEIGHT - PLAYER_SIZE;
-            verticalVelocity = 0;
-        }
-        mapOffset = playerPosition.x - 100.0f;
-        {
-            std::lock_guard<std::mutex> lock(_packetMutex);
-            packet.getPacket().playerPosition[playerId] = std::make_pair(
-                static_cast<int>(playerPosition.x), 
-                static_cast<int>(playerPosition.y)
-            );
-        }
         sf::FloatRect playerBounds;
         if (assetsLoaded) {
             playerSprite.setPosition(100, playerPosition.y);
@@ -385,6 +406,7 @@ void ClientModule::Client::gameThread()
         }
         scoreText.setString("Your Score: " + std::to_string(myScore) + 
                           "\nOther Player: " + std::to_string(otherScore));
+
         window.clear();
         if (assetsLoaded && assets.hasTexture("background")) {
             float bgOffset = mapOffset * 0.5f;
@@ -393,48 +415,67 @@ void ClientModule::Client::gameThread()
         } else {
             window.draw(backgroundRect);
         }
-        for (const auto& [coinSprite, collected] : animatedCoinSprites) {
-            if (collected) continue;
+
+        // Only draw game elements if we're not in WAITING state
+        if (gameState != PacketModule::WAITING) {
+            for (const auto& [coinSprite, collected] : animatedCoinSprites) {
+                if (collected) continue;
+                
+                if (assetsLoaded && assets.hasTexture("coin")) {
+                    window.draw(coinSprite);
+                } else {
+                    sf::RectangleShape adjustedCoin = coinRect;
+                    adjustedCoin.setPosition(coinSprite.getPosition());
+                    window.draw(adjustedCoin);
+                }
+            }
             
-            if (assetsLoaded && assets.hasTexture("coin")) {
-                window.draw(coinSprite);
+            for (const auto& electricSprite : animatedElectricSprites) {
+                if (assetsLoaded && assets.hasTexture("electric")) {
+                    window.draw(electricSprite);
+                } else {
+                    sf::RectangleShape adjustedElectric = electricRect;
+                    adjustedElectric.setPosition(electricSprite.getPosition());
+                    window.draw(adjustedElectric);
+                }
+            }
+            
+            if (endMarkerExists) {
+                if (assetsLoaded) {
+                    window.draw(endMarkerSprite);
+                } else {
+                    sf::RectangleShape adjustedEndMarker = endMarkerRect;
+                    adjustedEndMarker.setPosition(endMarkerSprite.getPosition());
+                    window.draw(adjustedEndMarker);
+                }
+            }
+            
+            // Draw current player
+            if (assetsLoaded && assets.hasTexture("player")) {
+                playerSprite.setPosition(100, playerPosition.y);
+                window.draw(playerSprite);
+                
+                // Draw other players only if there are at least 2 clients
+                if (current_state.getNbClient() >= 2) {
+                    otherPlayerSprite.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
+                    window.draw(otherPlayerSprite);
+                }
             } else {
-                sf::RectangleShape adjustedCoin = coinRect;
-                adjustedCoin.setPosition(coinSprite.getPosition());
-                window.draw(adjustedCoin);
+                playerRect.setPosition(100, playerPosition.y);
+                window.draw(playerRect);
+                
+                // Draw other players only if there are at least 2 clients
+                if (current_state.getNbClient() >= 2) {
+                    sf::RectangleShape otherPlayerRect = playerRect;
+                    otherPlayerRect.setFillColor(sf::Color::Red);
+                    otherPlayerRect.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
+                    window.draw(otherPlayerRect);
+                }
             }
         }
-        for (const auto& electricSprite : animatedElectricSprites) {
-            if (assetsLoaded && assets.hasTexture("electric")) {
-                window.draw(electricSprite);
-            } else {
-                sf::RectangleShape adjustedElectric = electricRect;
-                adjustedElectric.setPosition(electricSprite.getPosition());
-                window.draw(adjustedElectric);
-            }
-        }
-        if (endMarkerExists) {
-            if (assetsLoaded) {
-                window.draw(endMarkerSprite);
-            } else {
-                sf::RectangleShape adjustedEndMarker = endMarkerRect;
-                adjustedEndMarker.setPosition(endMarkerSprite.getPosition());
-                window.draw(adjustedEndMarker);
-            }
-        }
-        if (assetsLoaded && assets.hasTexture("player")) {
-            window.draw(playerSprite);
-            otherPlayerSprite.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
-            window.draw(otherPlayerSprite);
-        } else {
-            playerRect.setPosition(100, playerPosition.y);
-            window.draw(playerRect);
-            sf::RectangleShape otherPlayerRect = playerRect;
-            otherPlayerRect.setFillColor(sf::Color::Red);
-            otherPlayerRect.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
-            window.draw(otherPlayerRect);
-        }
+
         window.draw(scoreText);
+
         if (gameState == PacketModule::ENDED) {
             sf::Text gameOverText;
             gameOverText.setFont(font);

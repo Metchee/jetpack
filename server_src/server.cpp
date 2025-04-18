@@ -137,6 +137,8 @@ void Server::stop()
     }
 }
 
+// Changes to server_src/server.cpp
+
 void Server::handleNewConnection()
 {
     struct sockaddr_in client_addr;
@@ -166,8 +168,28 @@ void Server::handleNewConnection()
     auto& pkt = welcomePacket.getPacket();
     pkt.nb_client = _nbClients;
     pkt.client_id = client_id;
-    pkt.playerState[client_id] = PacketModule::WAITING;
-    pkt.playerPosition[client_id] = std::make_pair(0, 0);
+    
+    // Set game state to WAITING if we don't have at least 2 clients
+    if (_nbClients < 3) { // _nbClients is already incremented, so we need 3 (server + 2 clients)
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            pkt.playerState[i] = PacketModule::WAITING;
+        }
+    } else {
+        // If we have 2 clients, set game state to PLAYING for all clients
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            pkt.playerState[i] = PacketModule::PLAYING;
+        }
+        
+        // Update all existing packets to PLAYING state
+        for (auto& [id, packet] : _packets) {
+            auto& existingPkt = packet.getPacket();
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                existingPkt.playerState[i] = PacketModule::PLAYING;
+            }
+        }
+    }
+    
+    pkt.playerPosition[client_id] = std::make_pair(100, 300); // Set initial position
 
     // Load the map file into the packet
     std::ifstream mapFile(config.map_file);
@@ -189,14 +211,20 @@ void Server::handleNewConnection()
         return;
     }
 
-    sendPacket(client_fd, welcomePacket);
     _packets.emplace(client_id, welcomePacket);
+    
+    // Mark packets as updated so they'll be broadcast to all clients
+    _packetsUpdated = true;
+    
     if (config.debug_mode) {
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, ip, INET_ADDRSTRLEN);
         std::cout << "[SERVER] New client " << client_id << " from " << ip << std::endl;
+        std::cout << "[SERVER] Total clients: " << _nbClients-1 << ", Game state: " 
+                 << (pkt.playerState[0] == PacketModule::PLAYING ? "PLAYING" : "WAITING") << std::endl;
     }
 }
+
 
 void Server::handleClientData(int client_fd)
 {
@@ -307,6 +335,19 @@ void Server::broadcastPackets()
     // check if packets have been updated
     if (!_packetsUpdated)
         return;
+
+    // If we have at least 2 clients, make sure all are in PLAYING state
+    if (_clientIds.size() >= 2) {
+        // Update all existing packets to PLAYING state
+        for (auto& [id, packet] : _packets) {
+            auto& pkt = packet.getPacket();
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                if (pkt.playerState[i] != PacketModule::ENDED) {
+                    pkt.playerState[i] = PacketModule::PLAYING;
+                }
+            }
+        }
+    }
 
     // send packets to all clients
     for (auto& client : _fdsList) {
