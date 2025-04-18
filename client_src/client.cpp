@@ -9,6 +9,8 @@
 #include <chrono>
 #include <atomic>
 #include <csignal>
+#include <fcntl.h>     // Pour fcntl, F_GETFL, F_SETFL
+#include <errno.h>     // Pour errno, EAGAIN, EWOULDBLOCK
 
 // Global signal handler for cleaner shutdown
 std::atomic<bool> g_shutdown{false};

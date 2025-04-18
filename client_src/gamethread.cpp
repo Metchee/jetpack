@@ -1,6 +1,5 @@
 #include "../shared_include/Client.hpp"
 #include "../shared_include/AssetManager.hpp"
-#include "../shared_include/MapParser.hpp"
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <iostream>
@@ -9,6 +8,7 @@
 #include <chrono>
 #include <thread>
 #include <memory>
+#include <sstream>
 
 // Game constants
 const int WINDOW_WIDTH = 800;
@@ -91,8 +91,15 @@ void ClientModule::Client::gameThread()
     scoreText.setFillColor(sf::Color::White);
     scoreText.setPosition(10, 10);
     
-    // Map parser for handling game map
-    MapParser mapParser;
+    // Define map element structure
+    struct MapElement {
+        enum Type { EMPTY, COIN, ELECTRIC, END_MARKER };
+        Type type;
+        sf::Vector2f position;
+    };
+    
+    // Map data structures
+    std::vector<MapElement> mapElements;
     bool mapParsed = false;
     
     // Vectors to store game elements
@@ -116,7 +123,7 @@ void ClientModule::Client::gameThread()
         
         // Handle player input
         wasJumping = isJumping;
-        isJumping = sf::Keyboard::isPressed(sf::Keyboard::Space);
+        isJumping = sf::Keyboard::isKeyPressed(sf::Keyboard::Space);
         
         // Play jump sound when starting to jump
         if (isJumping && !wasJumping && assetsLoaded) {
@@ -137,36 +144,77 @@ void ClientModule::Client::gameThread()
         // Parse map data if received and not yet processed
         if (!mapParsed && std::strlen(current_state.getPacket().map) > 0) {
             std::string mapData = current_state.getPacket().map;
-            mapParser.parseMap(mapData);
             mapParsed = true;
+            
+            // Parse map string manually
+            std::istringstream stream(mapData);
+            std::string line;
+            int y = 0;
+            
+            while (std::getline(stream, line)) {
+                for (size_t x = 0; x < line.length(); x++) {
+                    if (line[x] == 'C') {
+                        MapElement element;
+                        element.type = MapElement::COIN;
+                        element.position = sf::Vector2f(x * 40 + 200, y * 40 + 100);
+                        mapElements.push_back(element);
+                    }
+                    else if (line[x] == 'E') {
+                        MapElement element;
+                        element.type = MapElement::ELECTRIC;
+                        element.position = sf::Vector2f(x * 40 + 200, y * 40 + 100);
+                        mapElements.push_back(element);
+                    }
+                    else if (line[x] == 'F') {
+                        MapElement element;
+                        element.type = MapElement::END_MARKER;
+                        element.position = sf::Vector2f(x * 40 + 200, y * 40 + 100);
+                        mapElements.push_back(element);
+                    }
+                }
+                y++;
+            }
             
             // Setup game elements based on parsed map
             if (assetsLoaded) {
                 // Setup coins
-                auto coinElements = mapParser.getElementsByType(COIN);
-                for (const auto& element : coinElements) {
-                    sf::Sprite sprite;
-                    sprite.setTexture(assets.getTexture("coin"));
-                    sprite.setPosition(element.position);
-                    coinSprites.push_back(std::make_pair(sprite, false));  // not collected
+                for (const auto& element : mapElements) {
+                    if (element.type == MapElement::COIN) {
+                        sf::Sprite sprite;
+                        sprite.setTexture(assets.getTexture("coin"));
+                        sprite.setPosition(element.position);
+                        coinSprites.push_back(std::make_pair(sprite, false));  // not collected
+                    }
+                    else if (element.type == MapElement::ELECTRIC) {
+                        sf::Sprite sprite;
+                        sprite.setTexture(assets.getTexture("electric"));
+                        sprite.setPosition(element.position);
+                        electricSprites.push_back(sprite);
+                    }
+                    else if (element.type == MapElement::END_MARKER) {
+                        endMarkerSprite.setTexture(assets.getTexture("player"));  // Use player texture as placeholder
+                        endMarkerSprite.setColor(sf::Color::Green);
+                        endMarkerSprite.setPosition(element.position);
+                        endMarkerExists = true;
+                    }
                 }
-                
-                // Setup electric obstacles
-                auto electricElements = mapParser.getElementsByType(ELECTRIC);
-                for (const auto& element : electricElements) {
-                    sf::Sprite sprite;
-                    sprite.setTexture(assets.getTexture("electric"));
-                    sprite.setPosition(element.position);
-                    electricSprites.push_back(sprite);
-                }
-                
-                // Setup end marker if it exists
-                auto endMarkers = mapParser.getElementsByType(END_MARKER);
-                if (!endMarkers.empty()) {
-                    endMarkerSprite.setTexture(assets.getTexture("player"));  // Use player texture as placeholder
-                    endMarkerSprite.setColor(sf::Color::Green);
-                    endMarkerSprite.setPosition(endMarkers[0].position);
-                    endMarkerExists = true;
+            } else {
+                // Setup for fallback rendering with colored rectangles
+                for (const auto& element : mapElements) {
+                    if (element.type == MapElement::COIN) {
+                        sf::Sprite sprite;
+                        sprite.setPosition(element.position);
+                        coinSprites.push_back(std::make_pair(sprite, false));
+                    }
+                    else if (element.type == MapElement::ELECTRIC) {
+                        sf::Sprite sprite;
+                        sprite.setPosition(element.position);
+                        electricSprites.push_back(sprite);
+                    }
+                    else if (element.type == MapElement::END_MARKER) {
+                        endMarkerSprite.setPosition(element.position);
+                        endMarkerExists = true;
+                    }
                 }
             }
         }
