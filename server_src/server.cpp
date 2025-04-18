@@ -55,6 +55,23 @@ Server::Server(int argc, char* argv[]) :
     }
 }
 
+void Server::stop()
+{
+    for (auto& client : _fdsList) {
+        close(client->fd);
+    }
+    _fdsList.clear();
+    _clientIds.clear();
+    _packets.clear();
+    if (_serverFd >= 0) {
+        close(_serverFd);
+        _serverFd = -1;
+    }
+    if (config.debug_mode) {
+        std::cout << "[SERVER] Server stopped" << std::endl;
+    }
+}
+
 Server::~Server()
 {
     stop();
