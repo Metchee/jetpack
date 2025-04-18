@@ -80,26 +80,28 @@ public:
     }
     
     // Initialize with default assets
+// Initialize with default assets
     bool loadDefaultAssets() {
         bool success = true;
         
         // Try to load textures
-        success &= loadTexture("player", "assets/player.png");
-        success &= loadTexture("coin", "assets/coin.png");
-        success &= loadTexture("electric", "assets/electric.png");
+        success &= loadTexture("player", "assets/player_sprite_sheet.png");
+        success &= loadTexture("coin", "assets/coins_sprite_sheet.png");
+        success &= loadTexture("electric", "assets/zapper_sprite_sheet.png");
         success &= loadTexture("background", "assets/background.png");
         
         // Try to load fonts
-        success &= loadFont("main", "assets/font.ttf");
+        success &= loadFont("main", "assets/jetpack_font.ttf");
         
         // Try to load sounds
-        success &= loadSound("jump", "assets/jump.wav");
-        success &= loadSound("coin", "assets/coin.wav");
-        success &= loadSound("death", "assets/death.wav");
+        success &= loadSound("jump", "assets/jetpack_start.wav");
+        success &= loadSound("coin", "assets/coin_pickup_1.wav");
+        success &= loadSound("death", "assets/dud_zapper_pop.wav");
+        success &= loadSound("jetpack", "assets/jetpack_lp.wav");
+        success &= loadSound("jetpack_stop", "assets/jetpack_stop.wav");
         
         return success;
     }
-    
 private:
     std::map<std::string, sf::Texture> textures;
     std::map<std::string, sf::Font> fonts;

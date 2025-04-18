@@ -80,7 +80,7 @@ void ClientModule::Client::gameThread()
         font = assets.getFont("main");
     } else {
         // Try to load a fallback font or use default
-        if (!font.loadFromFile("assets/font.ttf")) {
+        if (!font.loadFromFile("assets/jetpack_font.ttf")) {
             std::cerr << "Failed to load font" << std::endl;
         }
     }
