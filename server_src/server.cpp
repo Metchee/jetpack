@@ -83,7 +83,6 @@ void Server::run()
             }
         }
 
-        // Diffuser les paquets toutes les 50ms si une mise à jour est disponible
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_broadcast).count();
         if (_packetsUpdated && elapsed >= 50) {
@@ -136,8 +135,7 @@ void Server::handleNewConnection()
     pkt.nb_client = _nbClients;
     pkt.client_id = client_id;
     pkt.playerState[client_id] = PacketModule::WAITING;
-    pkt.playerPosition[client_id] = std::make_pair(100, 300); // Position initiale
-
+    pkt.playerPosition[client_id] = std::make_pair(100, 300);
     std::ifstream mapFile(config.map_file);
     mapFile.seekg(0, std::ios::end);
     std::streamsize file_size = mapFile.tellg();
@@ -154,14 +152,12 @@ void Server::handleNewConnection()
         std::cout << "[SERVER] New client " << client_id << " from " << ip << std::endl;
     }
 
-    // Mettre à jour nb_client pour tous les clients existants
     for (auto& packetPair : _packets) {
         packetPair.second.getPacket().nb_client = _nbClients;
     }
     _packetsUpdated = true;
     broadcastPackets();
 
-    // Démarrer le jeu si au moins 2 clients sont connectés
     if (_nbClients >= 2) {
         for (auto& clientPair : _clientIds) {
             int clientId = clientPair.second;
@@ -236,7 +232,7 @@ int Server::sendPacket(int client_fd, PacketModule &packetModule)
         removeClient(client_fd);
     }
     if (config.debug_mode) {
-        //packetModule.display("[SERVER]");
+        // packetModule.display("[SERVER]");
     }
     return bytes_sent;
 }

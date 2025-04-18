@@ -7,7 +7,6 @@
 #include <sstream>
 #include <iostream>
 
-// Map element types
 enum class TileType {
     EMPTY = 0,
     WALL,
@@ -16,21 +15,18 @@ enum class TileType {
     END_MARKER
 };
 
-// Map structure
 struct GameMap {
     int width;
     int height;
     std::vector<std::vector<TileType>> tiles;
     
-    // Utility function to get tile at a specific position
     TileType getTile(int x, int y) const {
         if (x >= 0 && x < width && y >= 0 && y < height) {
             return tiles[y][x];
         }
-        return TileType::WALL;  // Out of bounds is wall
+        return TileType::WALL; 
     }
     
-    // Load map from file
     static GameMap loadFromFile(const std::string& filename) {
         GameMap map;
         std::ifstream file(filename);
@@ -41,8 +37,6 @@ struct GameMap {
         
         std::string line;
         int lineNum = 0;
-        
-        // Read map dimensions from first line
         if (std::getline(file, line)) {
             std::istringstream iss(line);
             iss >> map.width >> map.height;
@@ -50,14 +44,10 @@ struct GameMap {
             if (map.width <= 0 || map.height <= 0) {
                 throw std::runtime_error("Invalid map dimensions");
             }
-            
-            // Initialize map tiles
             map.tiles.resize(map.height, std::vector<TileType>(map.width, TileType::EMPTY));
         } else {
             throw std::runtime_error("Invalid map file format");
         }
-        
-        // Read map data
         while (std::getline(file, line) && lineNum < map.height) {
             if (line.length() < static_cast<size_t>(map.width)) {
                 throw std::runtime_error("Map line too short");
@@ -69,10 +59,10 @@ struct GameMap {
                     case '#':
                         map.tiles[lineNum][x] = TileType::WALL;
                         break;
-                    case 'C':
+                    case 'c':
                         map.tiles[lineNum][x] = TileType::COIN;
                         break;
-                    case 'E':
+                    case 'e':
                         map.tiles[lineNum][x] = TileType::ELECTRIC;
                         break;
                     case 'F':
@@ -94,15 +84,9 @@ struct GameMap {
         
         return map;
     }
-    
-    // Serialize map to string (for network transmission)
     std::string serialize() const {
         std::ostringstream oss;
-        
-        // Write dimensions
         oss << width << " " << height << "\n";
-        
-        // Write map data
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 switch (tiles[y][x]) {
@@ -129,14 +113,10 @@ struct GameMap {
         
         return oss.str();
     }
-    
-    // Deserialize map from string (received from network)
     static GameMap deserialize(const std::string& data) {
         GameMap map;
         std::istringstream iss(data);
         std::string line;
-        
-        // Read dimensions
         if (std::getline(iss, line)) {
             std::istringstream dimStream(line);
             dimStream >> map.width >> map.height;
@@ -144,18 +124,13 @@ struct GameMap {
             if (map.width <= 0 || map.height <= 0) {
                 throw std::runtime_error("Invalid map dimensions");
             }
-            
-            // Initialize map tiles
             map.tiles.resize(map.height, std::vector<TileType>(map.width, TileType::EMPTY));
         } else {
             throw std::runtime_error("Invalid map data format");
         }
-        
-        // Read map data
         int lineNum = 0;
         while (std::getline(iss, line) && lineNum < map.height) {
             if (line.length() < static_cast<size_t>(map.width)) {
-                // Pad short lines with empty tiles
                 line.append(map.width - line.length(), '.');
             }
             
@@ -184,11 +159,8 @@ struct GameMap {
                     map.tiles[lineNum][x] = TileType::EMPTY;
                 }
             }
-            
             lineNum++;
         }
-        
-        // If we didn't get enough lines, fill the rest with empty tiles
         while (lineNum < map.height) {
             map.tiles[lineNum].assign(map.width, TileType::EMPTY);
             lineNum++;
@@ -197,46 +169,33 @@ struct GameMap {
         return map;
     }
 };
-
-// Sample map creation utility
 class MapGenerator {
 public:
-    // Generate a simple test map
     static GameMap generateTestMap(int width, int height) {
         GameMap map;
         map.width = width;
         map.height = height;
         map.tiles.resize(height, std::vector<TileType>(width, TileType::EMPTY));
-        
-        // Add walls at top and bottom
         for (int x = 0; x < width; ++x) {
             map.tiles[0][x] = TileType::WALL;
             map.tiles[height - 1][x] = TileType::WALL;
         }
-        
-        // Add some coins
         for (int x = 5; x < width; x += 7) {
             for (int y = 3; y < height - 3; y += 5) {
                 map.tiles[y][x] = TileType::COIN;
             }
         }
-        
-        // Add some electric obstacles
         for (int x = 10; x < width; x += 15) {
             for (int y = 5; y < height - 5; y += 8) {
                 map.tiles[y][x] = TileType::ELECTRIC;
             }
         }
-        
-        // Add end marker
         if (width > 10) {
             map.tiles[height / 2][width - 5] = TileType::END_MARKER;
         }
         
         return map;
     }
-    
-    // Save map to file
     static void saveMapToFile(const GameMap& map, const std::string& filename) {
         std::ofstream file(filename);
         

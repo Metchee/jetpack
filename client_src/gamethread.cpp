@@ -94,12 +94,10 @@ void ClientModule::Client::gameThread()
         if (assets.hasTexture("background")) {
             backgroundSprite.setTexture(assets.getTexture("background"));
             
-            // Afficher la taille de la texture du background
             sf::Vector2u backgroundSize = assets.getTexture("background").getSize();
             std::cout << "Background texture size: " << backgroundSize.x << "x" << backgroundSize.y << std::endl;
             
-            // Appliquer un zoom sur le background (par exemple, x2)
-            backgroundSprite.setScale(2.0f, 2.0f); // Zoom x2, ajustez selon vos besoins
+            backgroundSprite.setScale(2.0f, 2.0f);
             
             std::cout << "Background texture loaded" << std::endl;
         } else {
