@@ -30,6 +30,13 @@ void ClientModule::Client::gameThread()
     AssetManager assets;
     bool assetsLoaded = assets.loadDefaultAssets();
     
+    // Debug asset loading
+    if (assetsLoaded) {
+        std::cout << "Assets loaded successfully" << std::endl;
+    } else {
+        std::cout << "Failed to load assets" << std::endl;
+    }
+    
     // Setup fallback shapes if assets couldn't be loaded
     sf::RectangleShape playerRect(sf::Vector2f(PLAYER_SIZE, PLAYER_SIZE));
     playerRect.setFillColor(sf::Color::Blue);
@@ -48,61 +55,62 @@ void ClientModule::Client::gameThread()
     
     // Setup animated sprites
     AnimatedSprite playerSprite, otherPlayerSprite;
-    std::vector<AnimatedSprite> coinSprites;
-    std::vector<AnimatedSprite> electricSprites;
     sf::Sprite backgroundSprite, endMarkerSprite;
     
+    // Vectors to store game elements
+    std::vector<std::pair<AnimatedSprite, bool>> animatedCoinSprites;  // sprite and collected status
+    std::vector<AnimatedSprite> animatedElectricSprites;
+    bool endMarkerExists = false;
+    
     if (assetsLoaded) {
-        // Setup player animations
-        Animation playerRunAnim;
-        // Définir les frames de l'animation de course (32x32 pixels supposés)
-        for (int i = 0; i < 4; i++) {
-            playerRunAnim.addFrame(sf::IntRect(i * 32, 0, 32, 32));
+        // Check texture loading and sizes
+        if (assets.hasTexture("player")) {
+            sf::Vector2u playerSize = assets.getTexture("player").getSize();
+            std::cout << "Player texture size: " << playerSize.x << "x" << playerSize.y << std::endl;
+            
+            // Player sprite sheet dimensions: 534 x 803 with 4 frames per row
+            int playerFrameWidth = playerSize.x / 4;  // 534 / 4 = 133.5, round to 134
+            int playerFrameHeight = 201;  // Assuming each animation is this height
+            
+            // Create player running animation
+            Animation playerRunAnim;
+            for (int i = 0; i < 4; i++) {
+                playerRunAnim.addFrame(sf::IntRect(i * playerFrameWidth, 0, playerFrameWidth, playerFrameHeight));
+            }
+            playerRunAnim.setFrameTime(0.1f);
+            
+            // Create player jumping animation (assuming it's in the second row)
+            Animation playerJumpAnim;
+            for (int i = 0; i < 4; i++) {
+                playerJumpAnim.addFrame(sf::IntRect(i * playerFrameWidth, playerFrameHeight, playerFrameWidth, playerFrameHeight));
+            }
+            playerJumpAnim.setFrameTime(0.1f);
+            
+            // Set up player sprite
+            playerSprite.setTexture(assets.getTexture("player"));
+            playerSprite.addAnimation("run", playerRunAnim);
+            playerSprite.addAnimation("jump", playerJumpAnim);
+            playerSprite.play("run");
+            playerSprite.setScale(0.2f, 0.2f);  // Scale down to reasonable size
+            
+            // Set up other player sprite (same animations)
+            otherPlayerSprite.setTexture(assets.getTexture("player"));
+            otherPlayerSprite.addAnimation("run", playerRunAnim);
+            otherPlayerSprite.addAnimation("jump", playerJumpAnim);
+            otherPlayerSprite.play("run");
+            otherPlayerSprite.setScale(0.2f, 0.2f);
+            otherPlayerSprite.setColor(sf::Color(255, 100, 100));  // Tint to distinguish
+        } else {
+            std::cout << "Failed to load player texture" << std::endl;
         }
-        playerRunAnim.setFrameTime(0.1f);
-        playerRunAnim.setLoop(true);
         
-        Animation playerJumpAnim;
-        // Définir les frames de l'animation de saut
-        for (int i = 0; i < 2; i++) {
-            playerJumpAnim.addFrame(sf::IntRect(i * 32, 32, 32, 32));
+        // Set up background
+        if (assets.hasTexture("background")) {
+            backgroundSprite.setTexture(assets.getTexture("background"));
+            std::cout << "Background texture loaded" << std::endl;
+        } else {
+            std::cout << "Failed to load background texture" << std::endl;
         }
-        playerJumpAnim.setFrameTime(0.2f);
-        playerJumpAnim.setLoop(true);
-        
-        // Setup player sprite
-        playerSprite.setTexture(assets.getTexture("player"));
-        playerSprite.addAnimation("run", playerRunAnim);
-        playerSprite.addAnimation("jump", playerJumpAnim);
-        playerSprite.play("run");
-        
-        // Setup other player sprite
-        otherPlayerSprite.setTexture(assets.getTexture("player"));
-        otherPlayerSprite.addAnimation("run", playerRunAnim);
-        otherPlayerSprite.addAnimation("jump", playerJumpAnim);
-        otherPlayerSprite.play("run");
-        otherPlayerSprite.setColor(sf::Color(255, 100, 100)); // Tint to distinguish
-        
-        // Setup background
-        backgroundSprite.setTexture(assets.getTexture("background"));
-        
-        // Setup coin animation
-        Animation coinAnim;
-        // Coin sprite sheet: 6 frames x 16x16 pixels (supposés)
-        for (int i = 0; i < 6; i++) {
-            coinAnim.addFrame(sf::IntRect(i * 16, 0, 16, 16));
-        }
-        coinAnim.setFrameTime(0.1f);
-        coinAnim.setLoop(true);
-        
-        // Setup electric animation
-        Animation electricAnim;
-        // Electric sprite sheet: 4 frames x 32x32 pixels (supposés)
-        for (int i = 0; i < 4; i++) {
-            electricAnim.addFrame(sf::IntRect(i * 32, 0, 32, 32));
-        }
-        electricAnim.setFrameTime(0.1f);
-        electricAnim.setLoop(true);
     }
     
     // Setup sounds
@@ -110,11 +118,26 @@ void ClientModule::Client::gameThread()
     bool jetpackSoundPlaying = false;
     
     if (assetsLoaded) {
-        jumpSound.setBuffer(assets.getSound("jump"));
-        coinSound.setBuffer(assets.getSound("coin"));
-        deathSound.setBuffer(assets.getSound("death"));
-        jetpackSound.setBuffer(assets.getSound("jetpack"));
-        jetpackSound.setLoop(true);
+        if (assets.hasSound("jump")) {
+            jumpSound.setBuffer(assets.getSound("jump"));
+            std::cout << "Jump sound loaded" << std::endl;
+        }
+        
+        if (assets.hasSound("coin")) {
+            coinSound.setBuffer(assets.getSound("coin"));
+            std::cout << "Coin sound loaded" << std::endl;
+        }
+        
+        if (assets.hasSound("death")) {
+            deathSound.setBuffer(assets.getSound("death"));
+            std::cout << "Death sound loaded" << std::endl;
+        }
+        
+        if (assets.hasSound("jetpack")) {
+            jetpackSound.setBuffer(assets.getSound("jetpack"));
+            jetpackSound.setLoop(true);
+            std::cout << "Jetpack sound loaded" << std::endl;
+        }
     }
     
     // Game state variables
@@ -131,6 +154,7 @@ void ClientModule::Client::gameThread()
     sf::Font font;
     if (assetsLoaded && assets.hasFont("main")) {
         font = assets.getFont("main");
+        std::cout << "Font loaded" << std::endl;
     } else {
         // Try to load a fallback font or use default
         if (!font.loadFromFile("assets/jetpack_font.ttf")) {
@@ -154,11 +178,6 @@ void ClientModule::Client::gameThread()
     // Map data structures
     std::vector<MapElement> mapElements;
     bool mapParsed = false;
-    
-    // Vectors to store game elements
-    std::vector<std::pair<AnimatedSprite, bool>> animatedCoinSprites;  // sprite and collected status
-    std::vector<AnimatedSprite> animatedElectricSprites;
-    bool endMarkerExists = false;
     
     // Game clock for animations
     sf::Clock clock;
@@ -185,7 +204,7 @@ void ClientModule::Client::gameThread()
         if (isJumping && !wasJumping && assetsLoaded) {
             jumpSound.play();
             
-            if (!jetpackSoundPlaying) {
+            if (!jetpackSoundPlaying && assets.hasSound("jetpack")) {
                 jetpackSound.play();
                 jetpackSoundPlaying = true;
             }
@@ -207,8 +226,10 @@ void ClientModule::Client::gameThread()
         if (assetsLoaded) {
             if (isJumping) {
                 playerSprite.play("jump");
+                otherPlayerSprite.play("jump");
             } else {
                 playerSprite.play("run");
+                otherPlayerSprite.play("run");
             }
             
             // Update animations
@@ -244,6 +265,8 @@ void ClientModule::Client::gameThread()
             std::string mapData = current_state.getPacket().map;
             mapParsed = true;
             
+            std::cout << "Parsing map data, length: " << mapData.length() << std::endl;
+            
             // Parse map string manually
             std::istringstream stream(mapData);
             std::string line;
@@ -273,72 +296,85 @@ void ClientModule::Client::gameThread()
                 y++;
             }
             
+            std::cout << "Map elements found: " << mapElements.size() << std::endl;
+            
             // Setup game elements based on parsed map
             if (assetsLoaded) {
-                // Setup animated coins
+                // Check coin texture
+                if (assets.hasTexture("coin")) {
+                    sf::Vector2u coinSize = assets.getTexture("coin").getSize();
+                    std::cout << "Coin texture size: " << coinSize.x << "x" << coinSize.y << std::endl;
+                    
+                    // Assuming coin sprite sheet has 6 frames horizontally
+                    int coinFrameWidth = coinSize.x / 6;
+                    int coinFrameHeight = coinSize.y;
+                    
+                    // Create coin animation
+                    Animation coinAnim;
+                    for (int i = 0; i < 6; i++) {
+                        coinAnim.addFrame(sf::IntRect(i * coinFrameWidth, 0, coinFrameWidth, coinFrameHeight));
+                    }
+                    coinAnim.setFrameTime(0.1f);
+                    
+                    // Setup coins
+                    for (const auto& element : mapElements) {
+                        if (element.type == MapElement::COIN) {
+                            AnimatedSprite sprite;
+                            sprite.setTexture(assets.getTexture("coin"));
+                            sprite.addAnimation("spin", coinAnim);
+                            sprite.play("spin");
+                            sprite.setPosition(element.position);
+                            sprite.setScale(1.5f, 1.5f);  // Adjust scale as needed
+                            
+                            animatedCoinSprites.push_back(std::make_pair(sprite, false));
+                        }
+                    }
+                }
+                
+                // Check electric texture
+                if (assets.hasTexture("electric")) {
+                    sf::Vector2u electricSize = assets.getTexture("electric").getSize();
+                    std::cout << "Electric texture size: " << electricSize.x << "x" << electricSize.y << std::endl;
+                    
+                    // Assuming electric sprite sheet has 4 frames horizontally
+                    int electricFrameWidth = electricSize.x / 4;
+                    int electricFrameHeight = electricSize.y;
+                    
+                    // Create electric animation
+                    Animation electricAnim;
+                    for (int i = 0; i < 4; i++) {
+                        electricAnim.addFrame(sf::IntRect(i * electricFrameWidth, 0, electricFrameWidth, electricFrameHeight));
+                    }
+                    electricAnim.setFrameTime(0.15f);
+                    
+                    // Setup electric obstacles
+                    for (const auto& element : mapElements) {
+                        if (element.type == MapElement::ELECTRIC) {
+                            AnimatedSprite sprite;
+                            sprite.setTexture(assets.getTexture("electric"));
+                            sprite.addAnimation("zap", electricAnim);
+                            sprite.play("zap");
+                            sprite.setPosition(element.position);
+                            
+                            animatedElectricSprites.push_back(sprite);
+                        }
+                    }
+                }
+                
+                // Setup end marker
                 for (const auto& element : mapElements) {
-                    if (element.type == MapElement::COIN) {
-                        AnimatedSprite sprite;
-                        sprite.setTexture(assets.getTexture("coin"));
-                        
-                        // Create coin animation
-                        Animation coinAnim;
-                        for (int i = 0; i < 6; i++) {
-                            coinAnim.addFrame(sf::IntRect(i * 16, 0, 16, 16));
-                        }
-                        coinAnim.setFrameTime(0.1f);
-                        coinAnim.setLoop(true);
-                        
-                        sprite.addAnimation("spin", coinAnim);
-                        sprite.play("spin");
-                        sprite.setPosition(element.position);
-                        sprite.setScale(2.0f, 2.0f); // Scale up the small coin sprites
-                        
-                        animatedCoinSprites.push_back(std::make_pair(sprite, false));
-                    }
-                    else if (element.type == MapElement::ELECTRIC) {
-                        AnimatedSprite sprite;
-                        sprite.setTexture(assets.getTexture("electric"));
-                        
-                        // Create electric animation
-                        Animation electricAnim;
-                        for (int i = 0; i < 4; i++) {
-                            electricAnim.addFrame(sf::IntRect(i * 32, 0, 32, 32));
-                        }
-                        electricAnim.setFrameTime(0.15f);
-                        electricAnim.setLoop(true);
-                        
-                        sprite.addAnimation("zap", electricAnim);
-                        sprite.play("zap");
-                        sprite.setPosition(element.position);
-                        
-                        animatedElectricSprites.push_back(sprite);
-                    }
-                    else if (element.type == MapElement::END_MARKER) {
+                    if (element.type == MapElement::END_MARKER) {
+                        // Use player texture as placeholder
                         endMarkerSprite.setTexture(assets.getTexture("player"));
                         endMarkerSprite.setColor(sf::Color::Green);
                         endMarkerSprite.setPosition(element.position);
                         endMarkerExists = true;
+                        break;
                     }
                 }
             } else {
                 // Setup for fallback rendering with colored rectangles
-                for (const auto& element : mapElements) {
-                    if (element.type == MapElement::COIN) {
-                        AnimatedSprite sprite;
-                        sprite.setPosition(element.position);
-                        animatedCoinSprites.push_back(std::make_pair(sprite, false));
-                    }
-                    else if (element.type == MapElement::ELECTRIC) {
-                        AnimatedSprite sprite;
-                        sprite.setPosition(element.position);
-                        animatedElectricSprites.push_back(sprite);
-                    }
-                    else if (element.type == MapElement::END_MARKER) {
-                        endMarkerSprite.setPosition(element.position);
-                        endMarkerExists = true;
-                    }
-                }
+                // (Code for fallback rectangles is handled in the render section)
             }
         }
         
@@ -412,7 +448,7 @@ void ClientModule::Client::gameThread()
                 collected = true;
                 myScore++;
                 
-                if (assetsLoaded) {
+                if (assetsLoaded && assets.hasSound("coin")) {
                     coinSound.play();
                 }
             }
@@ -429,7 +465,7 @@ void ClientModule::Client::gameThread()
                 std::lock_guard<std::mutex> lock(_packetMutex);
                 packet.getPacket().playerState[playerId] = PacketModule::ENDED;
                 
-                if (assetsLoaded) {
+                if (assetsLoaded && assets.hasSound("death")) {
                     deathSound.play();
                     if (jetpackSoundPlaying) {
                         jetpackSound.stop();
@@ -441,9 +477,8 @@ void ClientModule::Client::gameThread()
         
         // Check end marker collision
         if (endMarkerExists) {
-            sf::FloatRect endMarkerBounds;
             endMarkerSprite.setPosition(endMarkerSprite.getPosition().x - mapOffset, endMarkerSprite.getPosition().y);
-            endMarkerBounds = endMarkerSprite.getGlobalBounds();
+            sf::FloatRect endMarkerBounds = endMarkerSprite.getGlobalBounds();
             
             if (playerBounds.intersects(endMarkerBounds)) {
                 // Player reached the end, send notification to server
@@ -460,7 +495,7 @@ void ClientModule::Client::gameThread()
         window.clear();
         
         // Draw background
-        if (assetsLoaded) {
+        if (assetsLoaded && assets.hasTexture("background")) {
             // Parallax scrolling effect
             float bgOffset = mapOffset * 0.5f;  // Background moves slower than foreground
             backgroundSprite.setPosition(-bgOffset, 0);
@@ -473,7 +508,7 @@ void ClientModule::Client::gameThread()
         for (const auto& [coinSprite, collected] : animatedCoinSprites) {
             if (collected) continue;
             
-            if (assetsLoaded) {
+            if (assetsLoaded && assets.hasTexture("coin")) {
                 window.draw(coinSprite);
             } else {
                 sf::RectangleShape adjustedCoin = coinRect;
@@ -484,7 +519,7 @@ void ClientModule::Client::gameThread()
         
         // Draw electric squares
         for (const auto& electricSprite : animatedElectricSprites) {
-            if (assetsLoaded) {
+            if (assetsLoaded && assets.hasTexture("electric")) {
                 window.draw(electricSprite);
             } else {
                 sf::RectangleShape adjustedElectric = electricRect;
@@ -505,11 +540,11 @@ void ClientModule::Client::gameThread()
         }
         
         // Draw player
-        if (assetsLoaded) {
-            // Always keep player at x=100 on screen (scroll the map instead)
+        if (assetsLoaded && assets.hasTexture("player")) {
+            // Main player is always at x=100
             window.draw(playerSprite);
             
-            // Draw other player relative to the map offset
+            // Draw other player
             otherPlayerSprite.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
             window.draw(otherPlayerSprite);
         } else {

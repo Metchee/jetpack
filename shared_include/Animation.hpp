@@ -2,7 +2,8 @@
 
 #include <SFML/Graphics.hpp>
 #include <vector>
-#include <cmath>
+#include <map>
+#include <string>
 
 // Classe pour gérer les animations de sprites
 class Animation {
@@ -43,7 +44,7 @@ public:
 
     // Mettre à jour l'animation avec le temps écoulé
     void update(float deltaTime) {
-        if (!isPlaying)
+        if (!isPlaying || frames.empty())
             return;
 
         totalTime += deltaTime;
@@ -65,6 +66,8 @@ public:
 
     // Obtenir le rectangle de texture actuel
     sf::IntRect getCurrentFrame() const {
+        if (frames.empty())
+            return sf::IntRect();
         return frames[currentFrame];
     }
 
