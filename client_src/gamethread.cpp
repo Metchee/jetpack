@@ -1,5 +1,6 @@
 #include "../shared_include/Client.hpp"
 #include "../shared_include/AssetManager.hpp"
+#include "../shared_include/Animation.hpp"
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <iostream>
@@ -45,23 +46,75 @@ void ClientModule::Client::gameThread()
     sf::RectangleShape backgroundRect(sf::Vector2f(WINDOW_WIDTH, WINDOW_HEIGHT));
     backgroundRect.setFillColor(sf::Color(50, 50, 150));
     
-    // Setup sprites
-    sf::Sprite playerSprite, otherPlayerSprite, backgroundSprite;
+    // Setup animated sprites
+    AnimatedSprite playerSprite, otherPlayerSprite;
+    std::vector<AnimatedSprite> coinSprites;
+    std::vector<AnimatedSprite> electricSprites;
+    sf::Sprite backgroundSprite, endMarkerSprite;
     
     if (assetsLoaded) {
+        // Setup player animations
+        Animation playerRunAnim;
+        // Définir les frames de l'animation de course (32x32 pixels supposés)
+        for (int i = 0; i < 4; i++) {
+            playerRunAnim.addFrame(sf::IntRect(i * 32, 0, 32, 32));
+        }
+        playerRunAnim.setFrameTime(0.1f);
+        playerRunAnim.setLoop(true);
+        
+        Animation playerJumpAnim;
+        // Définir les frames de l'animation de saut
+        for (int i = 0; i < 2; i++) {
+            playerJumpAnim.addFrame(sf::IntRect(i * 32, 32, 32, 32));
+        }
+        playerJumpAnim.setFrameTime(0.2f);
+        playerJumpAnim.setLoop(true);
+        
+        // Setup player sprite
         playerSprite.setTexture(assets.getTexture("player"));
+        playerSprite.addAnimation("run", playerRunAnim);
+        playerSprite.addAnimation("jump", playerJumpAnim);
+        playerSprite.play("run");
+        
+        // Setup other player sprite
         otherPlayerSprite.setTexture(assets.getTexture("player"));
+        otherPlayerSprite.addAnimation("run", playerRunAnim);
+        otherPlayerSprite.addAnimation("jump", playerJumpAnim);
+        otherPlayerSprite.play("run");
         otherPlayerSprite.setColor(sf::Color(255, 100, 100)); // Tint to distinguish
+        
+        // Setup background
         backgroundSprite.setTexture(assets.getTexture("background"));
+        
+        // Setup coin animation
+        Animation coinAnim;
+        // Coin sprite sheet: 6 frames x 16x16 pixels (supposés)
+        for (int i = 0; i < 6; i++) {
+            coinAnim.addFrame(sf::IntRect(i * 16, 0, 16, 16));
+        }
+        coinAnim.setFrameTime(0.1f);
+        coinAnim.setLoop(true);
+        
+        // Setup electric animation
+        Animation electricAnim;
+        // Electric sprite sheet: 4 frames x 32x32 pixels (supposés)
+        for (int i = 0; i < 4; i++) {
+            electricAnim.addFrame(sf::IntRect(i * 32, 0, 32, 32));
+        }
+        electricAnim.setFrameTime(0.1f);
+        electricAnim.setLoop(true);
     }
     
     // Setup sounds
-    sf::Sound jumpSound, coinSound, deathSound;
+    sf::Sound jumpSound, coinSound, deathSound, jetpackSound;
+    bool jetpackSoundPlaying = false;
     
     if (assetsLoaded) {
         jumpSound.setBuffer(assets.getSound("jump"));
         coinSound.setBuffer(assets.getSound("coin"));
         deathSound.setBuffer(assets.getSound("death"));
+        jetpackSound.setBuffer(assets.getSound("jetpack"));
+        jetpackSound.setLoop(true);
     }
     
     // Game state variables
@@ -103,14 +156,17 @@ void ClientModule::Client::gameThread()
     bool mapParsed = false;
     
     // Vectors to store game elements
-    std::vector<std::pair<sf::Sprite, bool>> coinSprites;  // sprite and collected status
-    std::vector<sf::Sprite> electricSprites;
-    sf::Sprite endMarkerSprite;
+    std::vector<std::pair<AnimatedSprite, bool>> animatedCoinSprites;  // sprite and collected status
+    std::vector<AnimatedSprite> animatedElectricSprites;
     bool endMarkerExists = false;
+    
+    // Game clock for animations
+    sf::Clock clock;
     
     // Game loop
     while (connected && window.isOpen()) {
         auto frameStart = std::chrono::high_resolution_clock::now();
+        float deltaTime = clock.restart().asSeconds();
         
         // Handle window events
         sf::Event event;
@@ -125,9 +181,51 @@ void ClientModule::Client::gameThread()
         wasJumping = isJumping;
         isJumping = sf::Keyboard::isKeyPressed(sf::Keyboard::Space);
         
-        // Play jump sound when starting to jump
+        // Handle jetpack sound
         if (isJumping && !wasJumping && assetsLoaded) {
             jumpSound.play();
+            
+            if (!jetpackSoundPlaying) {
+                jetpackSound.play();
+                jetpackSoundPlaying = true;
+            }
+        } else if (!isJumping && wasJumping && assetsLoaded) {
+            if (jetpackSoundPlaying) {
+                jetpackSound.stop();
+                jetpackSoundPlaying = false;
+                
+                // Play stop sound if available
+                if (assets.hasSound("jetpack_stop")) {
+                    sf::Sound stopSound;
+                    stopSound.setBuffer(assets.getSound("jetpack_stop"));
+                    stopSound.play();
+                }
+            }
+        }
+        
+        // Update player animation
+        if (assetsLoaded) {
+            if (isJumping) {
+                playerSprite.play("jump");
+            } else {
+                playerSprite.play("run");
+            }
+            
+            // Update animations
+            playerSprite.update(deltaTime);
+            otherPlayerSprite.update(deltaTime);
+            
+            // Update coin animations
+            for (auto& [coinSprite, collected] : animatedCoinSprites) {
+                if (!collected) {
+                    coinSprite.update(deltaTime);
+                }
+            }
+            
+            // Update electric animations
+            for (auto& electricSprite : animatedElectricSprites) {
+                electricSprite.update(deltaTime);
+            }
         }
         
         // Get current game state from network thread
@@ -177,22 +275,47 @@ void ClientModule::Client::gameThread()
             
             // Setup game elements based on parsed map
             if (assetsLoaded) {
-                // Setup coins
+                // Setup animated coins
                 for (const auto& element : mapElements) {
                     if (element.type == MapElement::COIN) {
-                        sf::Sprite sprite;
+                        AnimatedSprite sprite;
                         sprite.setTexture(assets.getTexture("coin"));
+                        
+                        // Create coin animation
+                        Animation coinAnim;
+                        for (int i = 0; i < 6; i++) {
+                            coinAnim.addFrame(sf::IntRect(i * 16, 0, 16, 16));
+                        }
+                        coinAnim.setFrameTime(0.1f);
+                        coinAnim.setLoop(true);
+                        
+                        sprite.addAnimation("spin", coinAnim);
+                        sprite.play("spin");
                         sprite.setPosition(element.position);
-                        coinSprites.push_back(std::make_pair(sprite, false));  // not collected
+                        sprite.setScale(2.0f, 2.0f); // Scale up the small coin sprites
+                        
+                        animatedCoinSprites.push_back(std::make_pair(sprite, false));
                     }
                     else if (element.type == MapElement::ELECTRIC) {
-                        sf::Sprite sprite;
+                        AnimatedSprite sprite;
                         sprite.setTexture(assets.getTexture("electric"));
+                        
+                        // Create electric animation
+                        Animation electricAnim;
+                        for (int i = 0; i < 4; i++) {
+                            electricAnim.addFrame(sf::IntRect(i * 32, 0, 32, 32));
+                        }
+                        electricAnim.setFrameTime(0.15f);
+                        electricAnim.setLoop(true);
+                        
+                        sprite.addAnimation("zap", electricAnim);
+                        sprite.play("zap");
                         sprite.setPosition(element.position);
-                        electricSprites.push_back(sprite);
+                        
+                        animatedElectricSprites.push_back(sprite);
                     }
                     else if (element.type == MapElement::END_MARKER) {
-                        endMarkerSprite.setTexture(assets.getTexture("player"));  // Use player texture as placeholder
+                        endMarkerSprite.setTexture(assets.getTexture("player"));
                         endMarkerSprite.setColor(sf::Color::Green);
                         endMarkerSprite.setPosition(element.position);
                         endMarkerExists = true;
@@ -202,14 +325,14 @@ void ClientModule::Client::gameThread()
                 // Setup for fallback rendering with colored rectangles
                 for (const auto& element : mapElements) {
                     if (element.type == MapElement::COIN) {
-                        sf::Sprite sprite;
+                        AnimatedSprite sprite;
                         sprite.setPosition(element.position);
-                        coinSprites.push_back(std::make_pair(sprite, false));
+                        animatedCoinSprites.push_back(std::make_pair(sprite, false));
                     }
                     else if (element.type == MapElement::ELECTRIC) {
-                        sf::Sprite sprite;
+                        AnimatedSprite sprite;
                         sprite.setPosition(element.position);
-                        electricSprites.push_back(sprite);
+                        animatedElectricSprites.push_back(sprite);
                     }
                     else if (element.type == MapElement::END_MARKER) {
                         endMarkerSprite.setPosition(element.position);
@@ -270,18 +393,21 @@ void ClientModule::Client::gameThread()
         // Check collisions
         sf::FloatRect playerBounds;
         if (assetsLoaded) {
-            playerSprite.setPosition(playerPosition);
+            playerSprite.setPosition(100, playerPosition.y);
             playerBounds = playerSprite.getGlobalBounds();
         } else {
-            playerRect.setPosition(playerPosition);
+            playerRect.setPosition(100, playerPosition.y);
             playerBounds = playerRect.getGlobalBounds();
         }
         
         // Check coin collisions
-        for (auto& [coinSprite, collected] : coinSprites) {
+        for (auto& [coinSprite, collected] : animatedCoinSprites) {
             if (collected) continue;
             
+            // Adjust position for scrolling
+            coinSprite.setPosition(coinSprite.getPosition().x - mapOffset, coinSprite.getPosition().y);
             sf::FloatRect coinBounds = coinSprite.getGlobalBounds();
+            
             if (playerBounds.intersects(coinBounds)) {
                 collected = true;
                 myScore++;
@@ -293,8 +419,11 @@ void ClientModule::Client::gameThread()
         }
         
         // Check electric square collisions
-        for (const auto& electricSprite : electricSprites) {
+        for (auto& electricSprite : animatedElectricSprites) {
+            // Adjust position for scrolling
+            electricSprite.setPosition(electricSprite.getPosition().x - mapOffset, electricSprite.getPosition().y);
             sf::FloatRect electricBounds = electricSprite.getGlobalBounds();
+            
             if (playerBounds.intersects(electricBounds)) {
                 // Player died, send notification to server through packet
                 std::lock_guard<std::mutex> lock(_packetMutex);
@@ -302,13 +431,20 @@ void ClientModule::Client::gameThread()
                 
                 if (assetsLoaded) {
                     deathSound.play();
+                    if (jetpackSoundPlaying) {
+                        jetpackSound.stop();
+                        jetpackSoundPlaying = false;
+                    }
                 }
             }
         }
         
         // Check end marker collision
         if (endMarkerExists) {
-            sf::FloatRect endMarkerBounds = endMarkerSprite.getGlobalBounds();
+            sf::FloatRect endMarkerBounds;
+            endMarkerSprite.setPosition(endMarkerSprite.getPosition().x - mapOffset, endMarkerSprite.getPosition().y);
+            endMarkerBounds = endMarkerSprite.getGlobalBounds();
+            
             if (playerBounds.intersects(endMarkerBounds)) {
                 // Player reached the end, send notification to server
                 std::lock_guard<std::mutex> lock(_packetMutex);
@@ -334,29 +470,25 @@ void ClientModule::Client::gameThread()
         }
         
         // Draw coins
-        for (const auto& [coinSprite, collected] : coinSprites) {
+        for (const auto& [coinSprite, collected] : animatedCoinSprites) {
             if (collected) continue;
             
             if (assetsLoaded) {
-                sf::Sprite adjustedSprite = coinSprite;
-                adjustedSprite.setPosition(coinSprite.getPosition().x - mapOffset, coinSprite.getPosition().y);
-                window.draw(adjustedSprite);
+                window.draw(coinSprite);
             } else {
                 sf::RectangleShape adjustedCoin = coinRect;
-                adjustedCoin.setPosition(coinSprite.getPosition().x - mapOffset, coinSprite.getPosition().y);
+                adjustedCoin.setPosition(coinSprite.getPosition());
                 window.draw(adjustedCoin);
             }
         }
         
         // Draw electric squares
-        for (const auto& electricSprite : electricSprites) {
+        for (const auto& electricSprite : animatedElectricSprites) {
             if (assetsLoaded) {
-                sf::Sprite adjustedSprite = electricSprite;
-                adjustedSprite.setPosition(electricSprite.getPosition().x - mapOffset, electricSprite.getPosition().y);
-                window.draw(adjustedSprite);
+                window.draw(electricSprite);
             } else {
                 sf::RectangleShape adjustedElectric = electricRect;
-                adjustedElectric.setPosition(electricSprite.getPosition().x - mapOffset, electricSprite.getPosition().y);
+                adjustedElectric.setPosition(electricSprite.getPosition());
                 window.draw(adjustedElectric);
             }
         }
@@ -364,12 +496,10 @@ void ClientModule::Client::gameThread()
         // Draw end marker
         if (endMarkerExists) {
             if (assetsLoaded) {
-                sf::Sprite adjustedSprite = endMarkerSprite;
-                adjustedSprite.setPosition(endMarkerSprite.getPosition().x - mapOffset, endMarkerSprite.getPosition().y);
-                window.draw(adjustedSprite);
+                window.draw(endMarkerSprite);
             } else {
                 sf::RectangleShape adjustedEndMarker = endMarkerRect;
-                adjustedEndMarker.setPosition(endMarkerSprite.getPosition().x - mapOffset, endMarkerSprite.getPosition().y);
+                adjustedEndMarker.setPosition(endMarkerSprite.getPosition());
                 window.draw(adjustedEndMarker);
             }
         }
@@ -377,7 +507,6 @@ void ClientModule::Client::gameThread()
         // Draw player
         if (assetsLoaded) {
             // Always keep player at x=100 on screen (scroll the map instead)
-            playerSprite.setPosition(100, playerPosition.y);
             window.draw(playerSprite);
             
             // Draw other player relative to the map offset
