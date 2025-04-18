@@ -101,7 +101,8 @@ std::string ClientModule::Client::getAddress() const {
     return std::string(ip) + ":" + std::to_string(ntohs(address.sin_port));
 }
 
-void ClientModule::Client::networkThread() {
+void ClientModule::Client::networkThread()
+{
     if (debugMode) {
         std::cout << "[CLIENT] Network thread started" << std::endl;
     }
@@ -109,25 +110,31 @@ void ClientModule::Client::networkThread() {
     PacketModule outgoingPacket;
     int flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    
     while (connected && !g_shutdown) {
-        int result = recv(fd, &incomingPacket, sizeof(PacketModule::Packet), MSG_DONTWAIT);
+        // Receive packet
+        ssize_t result = recv(fd, &incomingPacket, sizeof(PacketModule::Packet), MSG_DONTWAIT);
         if (result > 0) {
-            if (debugMode) {
-                std::lock_guard<std::mutex> lock(_packetMutex);
-                std::cout << "[CLIENT] Received packet from server" << std::endl;
-                incomingPacket.display("[CLIENT] Received: ");
-            }
-            {
-                std::lock_guard<std::mutex> lock(_packetMutex);
-                
-                if (id == -1) {
-                    id = incomingPacket.getClientId();
-                    if (debugMode) {
-                        std::cout << "[CLIENT] client ID: " << id << std::endl;
-                    }
+            if (static_cast<size_t>(result) == sizeof(PacketModule::Packet)) {
+                if (debugMode) {
+                    std::lock_guard<std::mutex> lock(_packetMutex);
+                    std::cout << "[CLIENT] Received packet from server" << std::endl;
+                    incomingPacket.display("[CLIENT] Received: ");
                 }
-                
-                packet = incomingPacket;
+                {
+                    std::lock_guard<std::mutex> lock(_packetMutex);
+                    if (id == -1) {
+                        id = incomingPacket.getClientId();
+                        if (debugMode) {
+                            std::cout << "[CLIENT] Assigned client ID: " << id << std::endl;
+                        }
+                    }
+                    packet = incomingPacket; // Update the shared packet
+                }
+            } else {
+                if (debugMode) {
+                    std::cerr << "[CLIENT] Incomplete packet received: " << result << " bytes" << std::endl;
+                }
             }
         } else if (result == -1) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -144,6 +151,8 @@ void ClientModule::Client::networkThread() {
             connected = false;
             break;
         }
+        
+        // Send updated packet back to server
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
             outgoingPacket = packet;
@@ -157,18 +166,18 @@ void ClientModule::Client::networkThread() {
                 connected = false;
                 break;
             }
-        }
-        if (debugMode) {
+        } else if (result > 0 && debugMode) {
             std::lock_guard<std::mutex> lock(_packetMutex);
             outgoingPacket.display("[CLIENT] Sent: ");
         }
+        
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+    
     if (debugMode) {
         std::cout << "[CLIENT] Network thread stopped" << std::endl;
     }
 }
-
 void ClientModule::Client::startThread() {
     if (debugMode) {
         std::cout << "[CLIENT] Starting threads" << std::endl;

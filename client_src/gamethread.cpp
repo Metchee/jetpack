@@ -36,6 +36,9 @@ void ClientModule::Client::gameThread()
     sf::RectangleShape playerRect(sf::Vector2f(PLAYER_SIZE, PLAYER_SIZE));
     playerRect.setFillColor(sf::Color::Blue);
     
+    sf::RectangleShape otherPlayerRect(sf::Vector2f(PLAYER_SIZE, PLAYER_SIZE));
+    otherPlayerRect.setFillColor(sf::Color::Red);
+    
     sf::RectangleShape coinRect(sf::Vector2f(PLAYER_SIZE * 0.75f, PLAYER_SIZE * 0.75f));
     coinRect.setFillColor(sf::Color::Yellow);
     
@@ -93,13 +96,8 @@ void ClientModule::Client::gameThread()
         
         if (assets.hasTexture("background")) {
             backgroundSprite.setTexture(assets.getTexture("background"));
-            
             sf::Vector2u backgroundSize = assets.getTexture("background").getSize();
-            std::cout << "Background texture size: " << backgroundSize.x << "x" << backgroundSize.y << std::endl;
             backgroundSprite.setScale(2.0f, 2.0f);
-            std::cout << "Background texture loaded" << std::endl;
-        } else {
-            std::cout << "Failed to load background texture" << std::endl;
         }
     }
     
@@ -107,25 +105,12 @@ void ClientModule::Client::gameThread()
     bool jetpackSoundPlaying = false;
     
     if (assetsLoaded) {
-        if (assets.hasSound("jump")) {
-            jumpSound.setBuffer(assets.getSound("jump"));
-            std::cout << "Jump sound loaded" << std::endl;
-        }
-        
-        if (assets.hasSound("coin")) {
-            coinSound.setBuffer(assets.getSound("coin"));
-            std::cout << "Coin sound loaded" << std::endl;
-        }
-        
-        if (assets.hasSound("death")) {
-            deathSound.setBuffer(assets.getSound("death"));
-            std::cout << "Death sound loaded" << std::endl;
-        }
-        
+        if (assets.hasSound("jump")) jumpSound.setBuffer(assets.getSound("jump"));
+        if (assets.hasSound("coin")) coinSound.setBuffer(assets.getSound("coin"));
+        if (assets.hasSound("death")) deathSound.setBuffer(assets.getSound("death"));
         if (assets.hasSound("jetpack")) {
             jetpackSound.setBuffer(assets.getSound("jetpack"));
             jetpackSound.setLoop(true);
-            std::cout << "Jetpack sound loaded" << std::endl;
         }
     }
     
@@ -141,12 +126,10 @@ void ClientModule::Client::gameThread()
     sf::Font font;
     if (assetsLoaded && assets.hasFont("main")) {
         font = assets.getFont("main");
-        std::cout << "Font loaded" << std::endl;
-    } else {
-        if (!font.loadFromFile("assets/jetpack_font.ttf")) {
-            std::cerr << "Failed to load font" << std::endl;
-        }
+    } else if (!font.loadFromFile("assets/jetpack_font.ttf")) {
+        std::cerr << "Failed to load font" << std::endl;
     }
+    
     sf::Text scoreText;
     scoreText.setFont(font);
     scoreText.setCharacterSize(24);
@@ -161,6 +144,7 @@ void ClientModule::Client::gameThread()
     std::vector<MapElement> mapElements;
     bool mapParsed = false;
     sf::Clock clock;
+    
     while (connected && window.isOpen()) {
         auto frameStart = std::chrono::high_resolution_clock::now();
         float deltaTime = clock.restart().asSeconds();
@@ -171,11 +155,11 @@ void ClientModule::Client::gameThread()
                 stop();
             }
         }
+        
         wasJumping = isJumping;
         isJumping = sf::Keyboard::isKeyPressed(sf::Keyboard::Space);
         if (isJumping && !wasJumping && assetsLoaded) {
             jumpSound.play();
-            
             if (!jetpackSoundPlaying && assets.hasSound("jetpack")) {
                 jetpackSound.play();
                 jetpackSoundPlaying = true;
@@ -191,6 +175,7 @@ void ClientModule::Client::gameThread()
                 }
             }
         }
+        
         if (assetsLoaded) {
             if (isJumping) {
                 playerSprite.play("jump");
@@ -202,21 +187,24 @@ void ClientModule::Client::gameThread()
             playerSprite.update(deltaTime);
             otherPlayerSprite.update(deltaTime);
             for (auto& [coinSprite, collected] : animatedCoinSprites) {
-                if (!collected) {
-                    coinSprite.update(deltaTime);
-                }
+                if (!collected) coinSprite.update(deltaTime);
             }
             for (auto& electricSprite : animatedElectricSprites) {
                 electricSprite.update(deltaTime);
             }
         }
+        
+        // Get the latest packet
         PacketModule current_state;
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
             current_state = packet;
         }
+        
         int playerId = current_state.getClientId();
         auto gameState = current_state.getstate();
+        
+        // Parse map data if not already done
         if (!mapParsed && std::strlen(current_state.getPacket().map) > 0) {
             std::string mapData = current_state.getPacket().map;
             mapParsed = true;
@@ -225,19 +213,17 @@ void ClientModule::Client::gameThread()
             int y = 0;
             while (std::getline(stream, line)) {
                 for (size_t x = 0; x < line.length(); x++) {
-                    if (line[x] == 'C') {
+                    if (line[x] == 'c') {
                         MapElement element;
                         element.type = MapElement::COIN;
                         element.position = sf::Vector2f(x * 40 + 200, y * 40 + 100);
                         mapElements.push_back(element);
-                    }
-                    else if (line[x] == 'E') {
+                    } else if (line[x] == 'e') {
                         MapElement element;
                         element.type = MapElement::ELECTRIC;
                         element.position = sf::Vector2f(x * 40 + 200, y * 40 + 100);
                         mapElements.push_back(element);
-                    }
-                    else if (line[x] == 'F') {
+                    } else if (line[x] == 'f') {
                         MapElement element;
                         element.type = MapElement::END_MARKER;
                         element.position = sf::Vector2f(x * 40 + 200, y * 40 + 100);
@@ -270,7 +256,6 @@ void ClientModule::Client::gameThread()
                 }
                 if (assets.hasTexture("electric")) {
                     sf::Vector2u electricSize = assets.getTexture("electric").getSize();
-                    std::cout << "Electric texture size: " << electricSize.x << "x" << electricSize.y << std::endl;
                     int electricFrameWidth = electricSize.x / 4;
                     int electricFrameHeight = electricSize.y;
                     Animation electricAnim;
@@ -285,7 +270,6 @@ void ClientModule::Client::gameThread()
                             sprite.addAnimation("zap", electricAnim);
                             sprite.play("zap");
                             sprite.setPosition(element.position);
-                            
                             animatedElectricSprites.push_back(sprite);
                         }
                     }
@@ -301,10 +285,14 @@ void ClientModule::Client::gameThread()
                 }
             }
         }
+        
+        // Update player positions from the packet
         if (playerId < current_state.getNbClient()) {
             auto myPos = current_state.getPosition();
             playerPosition.x = myPos.first;
             playerPosition.y = myPos.second;
+            
+            // Update other player's position
             int otherPlayerId = (playerId == 0) ? 1 : 0;
             if (otherPlayerId < current_state.getNbClient()) {
                 auto otherPos = current_state.getPacket().playerPosition[otherPlayerId];
@@ -312,6 +300,8 @@ void ClientModule::Client::gameThread()
                 otherPlayerPosition.y = otherPos.second;
             }
         }
+        
+        // Update player movement
         if (isJumping) {
             verticalVelocity = JUMP_FORCE;
         } else {
@@ -320,6 +310,8 @@ void ClientModule::Client::gameThread()
         
         playerPosition.y += verticalVelocity;
         playerPosition.x += HORIZONTAL_SCROLL_SPEED;
+        
+        // Enforce map boundaries
         if (playerPosition.y < 0) {
             playerPosition.y = 0;
             verticalVelocity = 0;
@@ -327,7 +319,10 @@ void ClientModule::Client::gameThread()
             playerPosition.y = WINDOW_HEIGHT - PLAYER_SIZE;
             verticalVelocity = 0;
         }
+        
         mapOffset = playerPosition.x - 100.0f;
+        
+        // Update packet with new player position
         {
             std::lock_guard<std::mutex> lock(_packetMutex);
             packet.getPacket().playerPosition[playerId] = std::make_pair(
@@ -335,6 +330,8 @@ void ClientModule::Client::gameThread()
                 static_cast<int>(playerPosition.y)
             );
         }
+        
+        // Handle collisions
         sf::FloatRect playerBounds;
         if (assetsLoaded) {
             playerSprite.setPosition(100, playerPosition.y);
@@ -343,6 +340,7 @@ void ClientModule::Client::gameThread()
             playerRect.setPosition(100, playerPosition.y);
             playerBounds = playerRect.getGlobalBounds();
         }
+        
         for (auto& [coinSprite, collected] : animatedCoinSprites) {
             if (collected) continue;
             coinSprite.setPosition(coinSprite.getPosition().x - mapOffset, coinSprite.getPosition().y);
@@ -351,12 +349,12 @@ void ClientModule::Client::gameThread()
             if (playerBounds.intersects(coinBounds)) {
                 collected = true;
                 myScore++;
-                
                 if (assetsLoaded && assets.hasSound("coin")) {
                     coinSound.play();
                 }
             }
         }
+        
         for (auto& electricSprite : animatedElectricSprites) {
             electricSprite.setPosition(electricSprite.getPosition().x - mapOffset, electricSprite.getPosition().y);
             sf::FloatRect electricBounds = electricSprite.getGlobalBounds();
@@ -364,7 +362,6 @@ void ClientModule::Client::gameThread()
             if (playerBounds.intersects(electricBounds)) {
                 std::lock_guard<std::mutex> lock(_packetMutex);
                 packet.getPacket().playerState[playerId] = PacketModule::ENDED;
-                
                 if (assetsLoaded && assets.hasSound("death")) {
                     deathSound.play();
                     if (jetpackSoundPlaying) {
@@ -374,6 +371,7 @@ void ClientModule::Client::gameThread()
                 }
             }
         }
+        
         if (endMarkerExists) {
             endMarkerSprite.setPosition(endMarkerSprite.getPosition().x - mapOffset, endMarkerSprite.getPosition().y);
             sf::FloatRect endMarkerBounds = endMarkerSprite.getGlobalBounds();
@@ -383,8 +381,12 @@ void ClientModule::Client::gameThread()
                 packet.getPacket().playerState[playerId] = PacketModule::ENDED;
             }
         }
+        
+        // Update scores (assuming server sends other player's score)
         scoreText.setString("Your Score: " + std::to_string(myScore) + 
-                          "\nOther Player: " + std::to_string(otherScore));
+                           "\nOther Player: " + std::to_string(otherScore));
+        
+        // Render the scene
         window.clear();
         if (assetsLoaded && assets.hasTexture("background")) {
             float bgOffset = mapOffset * 0.5f;
@@ -393,9 +395,9 @@ void ClientModule::Client::gameThread()
         } else {
             window.draw(backgroundRect);
         }
+        
         for (const auto& [coinSprite, collected] : animatedCoinSprites) {
             if (collected) continue;
-            
             if (assetsLoaded && assets.hasTexture("coin")) {
                 window.draw(coinSprite);
             } else {
@@ -404,6 +406,7 @@ void ClientModule::Client::gameThread()
                 window.draw(adjustedCoin);
             }
         }
+        
         for (const auto& electricSprite : animatedElectricSprites) {
             if (assetsLoaded && assets.hasTexture("electric")) {
                 window.draw(electricSprite);
@@ -413,6 +416,7 @@ void ClientModule::Client::gameThread()
                 window.draw(adjustedElectric);
             }
         }
+        
         if (endMarkerExists) {
             if (assetsLoaded) {
                 window.draw(endMarkerSprite);
@@ -422,30 +426,36 @@ void ClientModule::Client::gameThread()
                 window.draw(adjustedEndMarker);
             }
         }
+        
+        // Render both players
         if (assetsLoaded && assets.hasTexture("player")) {
+            playerSprite.setPosition(100, playerPosition.y);
             window.draw(playerSprite);
-            otherPlayerSprite.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
-            window.draw(otherPlayerSprite);
+            if (current_state.getNbClient() > 1) {
+                otherPlayerSprite.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
+                window.draw(otherPlayerSprite);
+            }
         } else {
             playerRect.setPosition(100, playerPosition.y);
             window.draw(playerRect);
-            sf::RectangleShape otherPlayerRect = playerRect;
-            otherPlayerRect.setFillColor(sf::Color::Red);
-            otherPlayerRect.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
-            window.draw(otherPlayerRect);
+            if (current_state.getNbClient() > 1) {
+                otherPlayerRect.setPosition(otherPlayerPosition.x - mapOffset, otherPlayerPosition.y);
+                window.draw(otherPlayerRect);
+            }
         }
+        
         window.draw(scoreText);
+        
+        // Display game state
         if (gameState == PacketModule::ENDED) {
             sf::Text gameOverText;
             gameOverText.setFont(font);
             gameOverText.setCharacterSize(36);
             gameOverText.setFillColor(sf::Color::White);
             gameOverText.setString("Game Over!");
-            
             sf::FloatRect textBounds = gameOverText.getLocalBounds();
             gameOverText.setOrigin(textBounds.width / 2, textBounds.height / 2);
             gameOverText.setPosition(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
-            
             window.draw(gameOverText);
         } else if (gameState == PacketModule::WAITING) {
             sf::Text waitingText;
@@ -456,15 +466,14 @@ void ClientModule::Client::gameThread()
             sf::FloatRect textBounds = waitingText.getLocalBounds();
             waitingText.setOrigin(textBounds.width / 2, textBounds.height / 2);
             waitingText.setPosition(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
-            
             window.draw(waitingText);
         }
         
         window.display();
+        
         auto frameEnd = std::chrono::high_resolution_clock::now();
         auto frameDuration = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart).count();
         int sleepTime = std::max(0, 16 - static_cast<int>(frameDuration));
-        
         if (sleepTime > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
         }
