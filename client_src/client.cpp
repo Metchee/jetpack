@@ -121,6 +121,11 @@ void ClientModule::Client::networkThread() {
                 std::lock_guard<std::mutex> lock(_packetMutex);
                 std::cout << "[CLIENT] Received packet from server" << std::endl;
                 incomingPacket.display("[CLIENT] Received: ");
+
+                for (int i = 0; i < incomingPacket.getNbClient(); ++i) {
+                    auto pos = incomingPacket.getPacket().playerPosition[i];
+                    std::cout << "[CLIENT] Player " << i << " position: (" << pos.first << ", " << pos.second << ")" << std::endl;
+                }
             }
             {
                 std::lock_guard<std::mutex> lock(_packetMutex);

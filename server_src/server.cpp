@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <chrono>
 
 Server::Server(int argc, char* argv[]) : _packetsUpdated(false), _serverFd(-1), _nbClients(1)
 {
@@ -55,8 +56,10 @@ void Server::run()
     server_pollfd.events = POLLIN;
     poll_fds.push_back(server_pollfd);
 
+    auto last_broadcast = std::chrono::steady_clock::now();
+
     while (true) {
-        poll_fds.resize(1); 
+        poll_fds.resize(1);
         for (auto& client : _fdsList) {
             pollfd client_pollfd;
             client_pollfd.fd = client->fd;
@@ -78,6 +81,14 @@ void Server::run()
                     handleClientData(poll_fds[i].fd);
                 }
             }
+        }
+
+        // Diffuser les paquets toutes les 50ms si une mise à jour est disponible
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_broadcast).count();
+        if (_packetsUpdated && elapsed >= 50) {
+            broadcastPackets();
+            last_broadcast = now;
         }
     }
 }
@@ -110,39 +121,23 @@ void Server::handleNewConnection()
         }
         return;
     }
-    // Set the client socket to non-blocking mode
     int flags = fcntl(client_fd, F_GETFL, 0);
     fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
 
-    // Add the new client to the list of file descriptors
     int client_id = _nbClients++;
     auto new_pollfd = std::make_shared<pollfd>();
     new_pollfd->fd = client_fd;
     new_pollfd->events = POLLIN;
     _fdsList.push_back(new_pollfd);
     _clientIds[client_fd] = client_id;
-    
-    if (_nbClients >= 2) {  // Au moins 2 clients (nbClients commence à 1)
-        for (auto& clientPair : _clientIds) {
-            int clientId = clientPair.second;
-            _packets[clientId].getPacket().playerState[clientId] = PacketModule::PLAYING;
-        }
-        _packetsUpdated = true;
-        broadcastPackets();
-        
-        if (config.debug_mode) {
-            std::cout << "[SERVER] Game started with " << (_nbClients - 1) << " players" << std::endl;
-        }
-    }
-    // Create a packet for the new client
+
     PacketModule welcomePacket(_nbClients);
     auto& pkt = welcomePacket.getPacket();
     pkt.nb_client = _nbClients;
     pkt.client_id = client_id;
     pkt.playerState[client_id] = PacketModule::WAITING;
-    pkt.playerPosition[client_id] = std::make_pair(0, 0);
+    pkt.playerPosition[client_id] = std::make_pair(100, 300); // Position initiale
 
-    // Load the map file into the packet
     std::ifstream mapFile(config.map_file);
     mapFile.seekg(0, std::ios::end);
     std::streamsize file_size = mapFile.tellg();
@@ -150,13 +145,34 @@ void Server::handleNewConnection()
     mapFile.read(pkt.map, file_size);
     pkt.map[file_size] = '\0';
 
-    // Send the welcome packet to the new client
     sendPacket(client_fd, welcomePacket);
     _packets.emplace(client_id, welcomePacket);
+
     if (config.debug_mode) {
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, ip, INET_ADDRSTRLEN);
         std::cout << "[SERVER] New client " << client_id << " from " << ip << std::endl;
+    }
+
+    // Mettre à jour nb_client pour tous les clients existants
+    for (auto& packetPair : _packets) {
+        packetPair.second.getPacket().nb_client = _nbClients;
+    }
+    _packetsUpdated = true;
+    broadcastPackets();
+
+    // Démarrer le jeu si au moins 2 clients sont connectés
+    if (_nbClients >= 2) {
+        for (auto& clientPair : _clientIds) {
+            int clientId = clientPair.second;
+            _packets[clientId].getPacket().playerState[clientId] = PacketModule::PLAYING;
+        }
+        _packetsUpdated = true;
+        broadcastPackets();
+
+        if (config.debug_mode) {
+            std::cout << "[SERVER] Game started with " << (_nbClients - 1) << " players" << std::endl;
+        }
     }
 }
 
@@ -180,7 +196,7 @@ void Server::handleClientData(int client_fd)
     }
     _packets.insert_or_assign(it->second, pkt);
     _packetsUpdated = true;
-    broadcastPackets();
+    // broadcastPackets();
 }
 
 void Server::removeClient(int client_fd)
