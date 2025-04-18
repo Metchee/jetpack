@@ -105,7 +105,8 @@ std::string ClientModule::Client::getAddress() const {
     return std::string(ip) + ":" + std::to_string(ntohs(address.sin_port));
 }
 
-void ClientModule::Client::networkThread() {
+void ClientModule::Client::networkThread()
+{
     if (debugMode) {
         std::cout << "[CLIENT] Network thread started" << std::endl;
     }
@@ -121,7 +122,9 @@ void ClientModule::Client::networkThread() {
                 std::lock_guard<std::mutex> lock(_packetMutex);
                 std::cout << "[CLIENT] Received packet from server" << std::endl;
                 incomingPacket.display("[CLIENT] Received: ");
-
+                std::cout << "[CLIENT] nb_client: " << incomingPacket.getNbClient() << std::endl;
+                std::cout << "[CLIENT] client_id: " << incomingPacket.getClientId() << std::endl;
+                std::cout << "[CLIENT] state: " << incomingPacket.getstate() << std::endl;
                 for (int i = 0; i < incomingPacket.getNbClient(); ++i) {
                     auto pos = incomingPacket.getPacket().playerPosition[i];
                     std::cout << "[CLIENT] Player " << i << " position: (" << pos.first << ", " << pos.second << ")" << std::endl;

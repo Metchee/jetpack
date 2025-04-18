@@ -136,6 +136,7 @@ void Server::handleNewConnection()
     pkt.client_id = client_id;
     pkt.playerState[client_id] = PacketModule::WAITING;
     pkt.playerPosition[client_id] = std::make_pair(100, 300);
+
     std::ifstream mapFile(config.map_file);
     mapFile.seekg(0, std::ios::end);
     std::streamsize file_size = mapFile.tellg();
@@ -152,26 +153,33 @@ void Server::handleNewConnection()
         std::cout << "[SERVER] New client " << client_id << " from " << ip << std::endl;
     }
 
+    // Mettre à jour tous les paquets existants
     for (auto& packetPair : _packets) {
         packetPair.second.getPacket().nb_client = _nbClients;
-    }
-    _packetsUpdated = true;
-    broadcastPackets();
-
-    if (_nbClients >= 2) {
-        for (auto& clientPair : _clientIds) {
-            int clientId = clientPair.second;
-            _packets[clientId].getPacket().playerState[clientId] = PacketModule::PLAYING;
+        for (int i = 0; i < _nbClients; ++i) {
+            if (_packets.find(i) != _packets.end()) {
+                packetPair.second.getPacket().playerPosition[i] = _packets[i].getPacket().playerPosition[i];
+            }
         }
-        _packetsUpdated = true;
-        broadcastPackets();
+    }
 
+    // Passer à l'état PLAYING si au moins 2 clients
+    if (_nbClients >= 2) {
+        for (auto& packetPair : _packets) {
+            int cid = packetPair.first;
+            packetPair.second.getPacket().playerState[cid] = PacketModule::PLAYING;
+            if (config.debug_mode) {
+                std::cout << "[SERVER] Setting client " << cid << " to PLAYING" << std::endl;
+            }
+        }
         if (config.debug_mode) {
             std::cout << "[SERVER] Game started with " << (_nbClients - 1) << " players" << std::endl;
         }
     }
-}
 
+    _packetsUpdated = true;
+    broadcastPackets();
+}
 void Server::handleClientData(int client_fd)
 {
     if (config.debug_mode) {
@@ -272,7 +280,15 @@ void Server::broadcastPackets()
         if (client->fd != _serverFd) {
             auto it = _clientIds.find(client->fd);
             if (it != _clientIds.end()) {
-                sendPacket(client->fd, _packets[it->second]);
+                int clientId = it->second;
+                PacketModule& packet = _packets[clientId];
+                packet.getPacket().nb_client = _nbClients; // Assurez-vous que nb_client est à jour
+                if (config.debug_mode) {
+                    std::cout << "[SERVER] Broadcasting to client " << clientId 
+                              << " (fd: " << client->fd << "), nb_client: " << _nbClients 
+                              << ", state: " << packet.getPacket().playerState[clientId] << std::endl;
+                }
+                sendPacket(client->fd, packet);
             }
         }
     }
