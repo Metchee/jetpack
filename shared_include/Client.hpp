@@ -19,7 +19,7 @@ namespace ClientModule {
                 std::string name;
                 uintmax_t size;
             };
-            Client(int ac, const char *av[]);
+            Client(int ac, char* av[]);
             ~Client();
 
     // Main Running Function

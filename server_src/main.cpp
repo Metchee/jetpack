@@ -1,13 +1,14 @@
-#include "../shared_include/Server.hpp"
-#include "../shared_include/Error.hpp"
+#include "Client.hpp"
+#include "Error.hpp"
 #include <iostream>
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[])  // Changez const char* à char*
+{
     try {
-        Server server(argc, argv);
-        server.run();
+        ClientModule::Client client(argc, argv);
+        client.run();
     } catch (const std::exception& e) {
-        std::cerr << "Server error: " << e.what() << std::endl;
+        std::cerr << "Client error: " << e.what() << std::endl;
         return ERROR;
     }
     return SUCCESS;
