@@ -70,7 +70,7 @@ void ClientModule::Client::gameThread()
             
             // Player sprite sheet dimensions: 534 x 803 with 4 frames per row
             int playerFrameWidth = playerSize.x / 4;  // 534 / 4 = 133.5, round to 134
-            int playerFrameHeight = 201;  // Assuming each animation is this height
+            int playerFrameHeight = 133;  // Assuming each animation is this height
             
             // Create player running animation
             Animation playerRunAnim;
