@@ -20,6 +20,7 @@ SERVER_SRC = 	$(SERVER_DIR)/server.cpp 		\
 
 CLIENT_SRC = $(CLIENT_DIR)/client.cpp \
              $(CLIENT_DIR)/main.cpp \
+             $(CLIENT_DIR)/gamethread.cpp \
              $(SERVER_DIR)/packet.cpp
 
 SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
@@ -28,13 +29,16 @@ CLIENT_OBJ = $(CLIENT_SRC:.cpp=.o)
 SERVER_NAME = jetpack_server
 CLIENT_NAME = jetpack_client
 
+# SFML settings for client
+CLIENT_LDFLAGS = $(LDFLAGS) -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio
+
 all: server client
 
 server: $(SERVER_OBJ)
 	$(CC) $(CFLAGS) -o $(SERVER_NAME) $(SERVER_OBJ) $(LDFLAGS)
 
 client: $(CLIENT_OBJ)
-	$(CC) $(CFLAGS) -o $(CLIENT_NAME) $(CLIENT_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $(CLIENT_NAME) $(CLIENT_OBJ) $(CLIENT_LDFLAGS)
 
 %.o: %.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
