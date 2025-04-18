@@ -79,13 +79,13 @@ void ClientModule::Client::gameThread()
             playerSprite.addAnimation("run", playerRunAnim);
             playerSprite.addAnimation("jump", playerJumpAnim);
             playerSprite.play("run");
-            playerSprite.setScale(0.2f, 0.2f);
+            playerSprite.setScale(0.5f, 0.5f);
             
             otherPlayerSprite.setTexture(assets.getTexture("player"));
             otherPlayerSprite.addAnimation("run", playerRunAnim);
             otherPlayerSprite.addAnimation("jump", playerJumpAnim);
             otherPlayerSprite.play("run");
-            otherPlayerSprite.setScale(0.2f, 0.2f);
+            otherPlayerSprite.setScale(0.5f, 0.5f);
             otherPlayerSprite.setColor(sf::Color(255, 100, 100));
         } else {
             std::cout << "Failed to load player texture" << std::endl;
