@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 #include "Error.hpp"
-#include "../client_src/Graphics.hpp"
+
 
 namespace ClientModule {
     class Client {
@@ -55,13 +55,5 @@ namespace ClientModule {
             sockaddr_in address;
             bool connected;
             bool debugMode;
-
-            GraphicsEngine _graphics;
-        
-            // Ajouter la carte
-            std::vector<std::vector<TileType>> _map;
-            
-            // Méthode pour recevoir la carte du serveur
-            void receiveMap();
     };
 };

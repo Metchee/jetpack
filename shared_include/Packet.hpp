@@ -18,16 +18,6 @@ class PacketModule {
             PLAYING = 0,
             WAITING,
             ENDED,
-            WINNER,    // Ajouté: Joueur gagnant
-            LOSER      // Ajouté: Joueur perdant
-        };
-
-        enum packetType {
-            GAME_STATE = 0,
-            PLAYER_INPUT,
-            MAP_DATA,
-            GAME_START,
-            GAME_END
         };
 
         struct Packet {
@@ -35,39 +25,25 @@ class PacketModule {
                 if (this != &other) {
                     nb_client = other.nb_client;
                     client_id = other.client_id;
-                    type = other.type;
                     for (int i = 0; i < MAX_CLIENTS; ++i) {
                         playerState[i] = other.playerState[i];
                         playerPosition[i] = other.playerPosition[i];
-                        playerScore[i] = other.playerScore[i];
-                        jetpackActive[i] = other.jetpackActive[i];
                     }
                 }
                 return *this;
             }
             int nb_client;
             int client_id;
-            packetType type;
             gameState playerState[MAX_CLIENTS];
             std::pair<int, int> playerPosition[MAX_CLIENTS];
-            int playerScore[MAX_CLIENTS];
-            bool jetpackActive[MAX_CLIENTS];
         };
-        
         void display(std::string info);
         void setPacket(const struct Packet& pkt);
         Packet& getPacket() { return pkt; }
-        const Packet& getPacket() const { return pkt; }  // Ajoutez cette ligne
         int getNbClient() const;
         int getClientId() const;
         gameState getstate() const;
         std::pair<int, int> getPosition() const;
-        int getScore() const;
-        bool getJetpackActive() const;
-        void setJetpackActive(bool active);
-        packetType getPacketType() const;
-        void setPacketType(packetType type);
-        
     private:
         struct Packet pkt;
 };
