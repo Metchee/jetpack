@@ -285,25 +285,29 @@ void Server::broadcastPackets()
     if (!_packetsUpdated)
         return;
 
+    // Mettre à jour tous les paquets dans _packets avant la diffusion
+    for (auto& packetPair : _packets) {
+        packetPair.second.getPacket().nb_client = _nbClients;
+        for (int i = 0; i < _nbClients; ++i) {
+            if (_packets.find(i) != _packets.end()) {
+                packetPair.second.getPacket().playerPosition[i] = _packets[i].getPacket().playerPosition[i];
+                packetPair.second.getPacket().playerState[i] = _packets[i].getPacket().playerState[i];
+            }
+        }
+    }
+
+    // Diffuser les paquets mis à jour
     for (auto& client : _fdsList) {
         if (client->fd != _serverFd) {
             auto it = _clientIds.find(client->fd);
             if (it != _clientIds.end()) {
                 int clientId = it->second;
-                PacketModule packet = _packets[clientId]; // Copie du paquet pour ce client
-                auto& pkt = packet.getPacket();
-                pkt.nb_client = _nbClients;
-                // Mettre à jour les positions de tous les joueurs
-                for (int i = 0; i < _nbClients; ++i) {
-                    if (_packets.find(i) != _packets.end()) {
-                        pkt.playerPosition[i] = _packets[i].getPacket().playerPosition[i];
-                    }
-                }
+                PacketModule packet = _packets[clientId]; // Copie du paquet
                 if (config.debug_mode) {
                     std::cout << "[SERVER] Broadcasting to client " << clientId 
-                              << " (fd: " << client->fd << "), nb_client: " << pkt.nb_client 
-                              << ", client_id: " << pkt.client_id 
-                              << ", state: " << pkt.playerState[clientId] << std::endl;
+                              << " (fd: " << client->fd << "), nb_client: " << packet.getPacket().nb_client 
+                              << ", client_id: " << packet.getPacket().client_id 
+                              << ", state: " << packet.getPacket().playerState[clientId] << std::endl;
                 }
                 sendPacket(client->fd, packet);
             }
