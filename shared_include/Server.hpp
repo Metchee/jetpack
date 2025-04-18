@@ -18,7 +18,7 @@ public:
         uintmax_t size;
     };
     
-    Server(int argc, char* argv[]);
+    Server(int argc, const char* argv[]);
     ~Server();
     
     void run();

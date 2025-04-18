@@ -11,14 +11,17 @@
 #include <chrono>
 #include <thread>
 
-Server::Server(int argc, char* argv[]) : 
+// Update constructor to use const char* argv[]
+Server::Server(int argc, const char* argv[]) : 
     _packetsUpdated(false), 
     _serverFd(-1), 
     _nbClients(0),
     _game(std::make_unique<Game>()),
     _lastUpdateTime(std::chrono::steady_clock::now())
 {
-    config.parseArgs(argc, argv);
+    // Convert to non-const for parseArgs which expects char*[]
+    char** non_const_argv = const_cast<char**>(argv);
+    config.parseArgs(argc, non_const_argv);
     
     // Load map
     if (!_game->loadMap(config.map_file)) {
@@ -54,7 +57,6 @@ Server::Server(int argc, char* argv[]) :
         std::cout << "[SERVER] Loaded map: " << config.map_file << std::endl;
     }
 }
-
 void Server::stop()
 {
     for (auto& client : _fdsList) {
