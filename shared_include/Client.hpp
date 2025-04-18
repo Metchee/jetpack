@@ -1,5 +1,7 @@
 #pragma once
 #include "Packet.hpp"
+#include "Map.hpp"
+#include "Game.hpp"
 #include <mutex>
 #include <string>
 #include <sys/socket.h>
@@ -7,8 +9,8 @@
 #include <arpa/inet.h>
 #include <thread>
 #include <vector>
+#include <condition_variable>
 #include "Error.hpp"
-
 
 namespace ClientModule {
     class Client {
@@ -35,19 +37,23 @@ namespace ClientModule {
             void gameThread();
             void networkThread();
             void startThread();
-            void runThread();
-            std::mutex _packetMutex;
+            
+    // Map Handling
+            void receiveMapData();
 
     // File Transfer Handling
-           
             void receiveAssets(int serverSocket);
             void receiveFile(int serverSocket, const std::string& savePath);
             std::vector<ReceivedFileInfo> receiveDirectoryData(int serverSocket);
+            
        private:
+            void parseArguments(int argc, const char *argv[]);
+            
+            // Threads
             std::thread _gameThread;
             std::thread _networkThread;
-            void parseArguments(int argc, const char *argv[]);
-            PacketModule packet;
+            
+            // Network
             int fd;
             int id;
             int serverPort;
@@ -55,5 +61,15 @@ namespace ClientModule {
             sockaddr_in address;
             bool connected;
             bool debugMode;
+            
+            // Game state
+            PacketModule _currentPacket;
+            std::mutex _packetMutex;
+            
+            // Map
+            Map _map;
+            bool _mapLoaded;
+            std::mutex _mapMutex;
+            std::condition_variable _mapCV;
     };
 };
